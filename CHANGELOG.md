@@ -165,9 +165,9 @@ First tagged release. Highlights of the pre-release hardening pass:
 
 ### Removed
 - Demo `users` / `posts` / `events` controllers, their repositories, domain
-  types, tests, and migrations. The template now ships infrastructure-only
-  (Health + Jobs); the worked CRUD pattern moved to `docs/EXAMPLES.md` so
-  `src/` stays free of example noise when you fork.
+  types, tests, and migrations. The real auth / account / admin / audit domain
+  stays; only the throwaway CRUD demo was removed, and the worked CRUD pattern
+  moved to `docs/EXAMPLES.md` so `src/` stays free of example noise when you fork.
 - `ensure_test_seed()` helper (no longer needed without the demo schema).
 
 ### Security
