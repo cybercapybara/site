@@ -42,18 +42,32 @@ spec:
                 - -ec
                 - |
                   ts="$(date -u +%Y%m%dT%H%M%SZ)"
-                  file="{{ .Values.externalDatabase.name }}-${ts}.sql.gz"
+                  base="{{ .Values.externalDatabase.name }}-${ts}.sql"
+                  file="${base}.gz"
                   echo "Dumping {{ .Values.externalDatabase.name }} -> ${file}"
+                  # Dump to a FILE, not through a pipe: `sh -e` does not have
+                  # pipefail, so `pg_dump | gzip` would mask a failed pg_dump as
+                  # success (gzip of nothing is a valid .gz) and upload a
+                  # truncated dump under a "successful" job. With -f, -e aborts here.
                   pg_dump --no-owner --no-privileges \
                     -h "{{ .Values.externalDatabase.host }}" \
                     -p "{{ .Values.externalDatabase.port }}" \
                     -U "{{ .Values.externalDatabase.user }}" \
                     -d "{{ .Values.externalDatabase.name }}" \
-                    | gzip -c > "/tmp/${file}"
-                  echo "Uploading to {{ .Values.backup.s3.bucket }}/${file}"
+                    -f "/tmp/${base}"
+                  gzip -c "/tmp/${base}" > "/tmp/${file}"
+                  rm -f "/tmp/${base}"
+                  # Trust nothing: verify the gzip is intact and not trivially small.
+                  gunzip -t "/tmp/${file}"
+                  sz="$(wc -c < "/tmp/${file}")"
+                  if [ "${sz}" -lt 100 ]; then
+                    echo "Backup ${file} is only ${sz} bytes — refusing to upload a truncated dump" >&2
+                    exit 1
+                  fi
+                  echo "Uploading ${file} (${sz} bytes) to {{ .Values.backup.s3.bucket }}/${file}"
                   aws s3 cp "/tmp/${file}" "s3://{{ .Values.backup.s3.bucket }}/{{ .Values.backup.s3.prefix }}${file}" \
                     {{- if .Values.backup.s3.endpoint }} --endpoint-url "{{ .Values.backup.s3.endpoint }}"{{- end }}
-                  echo "Backup complete."
+                  echo "Backup complete: ${sz} bytes."
               env:
                 - name: PGPASSWORD
                   valueFrom:
