@@ -507,4 +507,6 @@ plus a production-hardening checklist.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE). Third-party dependencies and their licenses (plus
+the flask-base attribution for the ported account/admin surface) are listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
