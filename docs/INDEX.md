@@ -50,7 +50,7 @@ question instead of grepping the tree.
 | File | What's there |
 |---|---|
 | [`../migrations/README.md`](../migrations/README.md) | Migration conventions, NNN_*.sql naming, runner behaviour, seed flow |
-| [`../scripts/new-migration.sh`](../scripts/new-migration.sh) | Generate the next numbered migration with a `BEGIN/COMMIT` skeleton |
+| [`../scripts/new-migration.sh`](../scripts/new-migration.sh) | Generate the next numbered migration (NO BEGIN/COMMIT — the runner wraps each file in one advisory-locked transaction) |
 
 ## Build & test
 
@@ -66,7 +66,7 @@ question instead of grepping the tree.
 
 | File | What's there |
 |---|---|
-| [`../.github/workflows/ci.yml`](../.github/workflows/ci.yml) | Primary CI: build + test + format + secret-scan |
+| [`../.github/workflows/ci.yml`](../.github/workflows/ci.yml) | GitHub Actions CI (kept in parity with the canonical GitLab pipeline): build + test + format + secret-scan |
 | [`../.github/workflows/release.yml`](../.github/workflows/release.yml) | Tag-driven multi-arch image build + draft release |
 | [`../.gitlab-ci.yml`](../.gitlab-ci.yml) | Self-hosted GitLab pipeline (kept for parity) |
 | [`../helm/cpp-api/`](../helm/cpp-api/) | API Helm chart |

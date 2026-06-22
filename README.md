@@ -167,7 +167,7 @@ the value here is the integration glue, and that glue assumes containers.
 ## Quick start
 
 ```bash
-git clone https://github.com/your-org/cpp-rapid-rest-template.git my-service
+git clone https://gitlab.com/tarassov.me/cpp-rapid-rest-template.git my-service
 cd my-service
 
 # Rename template identity (project name, image registry, helm charts, etc.)

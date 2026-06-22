@@ -10,8 +10,8 @@ Every subsystem is a singleton accessed via `Module::get()`:
 
 Each module holds a `std::unique_ptr<Impl>` initialized by `Module::initialize()`
 and torn down by `Module::shutdown()`. `Core::initialize()` orchestrates the
-order (Config → Observability → Async → Database → Migrations → Cache →
-Messaging → Tasks → Security → Jobs).
+order (Config → Observability → Database → Migrations → Cache → Messaging →
+Tasks → Security → Jobs → Mailer).
 
 Why this is worth a record: globals are a code smell in many shops, and a
 new contributor will reasonably ask "should I use DI here?" before adding
