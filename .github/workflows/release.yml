@@ -39,7 +39,7 @@ jobs:
     permissions:
       contents: read   # checkout
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Extract version
         id: ver
@@ -171,7 +171,7 @@ jobs:
     permissions:
       contents: write  # create the GitHub Release + tag notes
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0  # needed for CHANGELOG parsing
 
