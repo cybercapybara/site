@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { LogOut } from 'lucide-react';
+import { LogOut, Moon, Sun } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { BRAND } from '@/lib/brand';
 import { useLogout } from '@/hooks/useAuthMutations';
 import { useMe } from '@/hooks/useMe';
 import { userCan } from '@/lib/auth/permissions';
@@ -12,6 +14,22 @@ export function Nav() {
   const user = me.data ?? null;
   const logout = useLogout();
   const navigate = useNavigate();
+
+  // Minimal theme toggle: the .dark class drives Tailwind's dark: variants; the
+  // initial class is set pre-paint by the inline script in index.html.
+  const [dark, setDark] = useState(
+    () => typeof document !== 'undefined' && document.documentElement.classList.contains('dark'),
+  );
+  const toggleTheme = () => {
+    const next = !dark;
+    setDark(next);
+    document.documentElement.classList.toggle('dark', next);
+    try {
+      localStorage.setItem('theme', next ? 'dark' : 'light');
+    } catch {
+      /* ignore */
+    }
+  };
 
   // Show the logged-out auth buttons (Log in / Register) only once /me has
   // RESOLVED to "no session" — me.isSuccess && !user. Gating on isSuccess
@@ -32,7 +50,7 @@ export function Nav() {
       <div className="container mx-auto flex h-14 items-center justify-between">
         <div className="flex items-center gap-6">
           <Link to="/" className="font-semibold">
-            App
+            {BRAND}
           </Link>
           <div className="flex items-center gap-4 text-sm">
             {navLinks.map((r) => {
@@ -51,6 +69,9 @@ export function Nav() {
           </div>
         </div>
         <div className="flex items-center gap-3 text-sm">
+          <Button size="sm" variant="ghost" onClick={toggleTheme} aria-label="Toggle theme">
+            {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          </Button>
           {user && (
             <>
               <Link to="/account" className="text-muted-foreground hover:text-foreground">
