@@ -237,7 +237,7 @@ test:integration:
     - if: $CI_COMMIT_BRANCH == "master"
     - if: $CI_COMMIT_BRANCH == "develop"
 
-# Image security scan — Trivy fails the pipeline on CRITICAL CVEs.
+# Image security scan — Trivy fails the pipeline on CRITICAL+HIGH CVEs (with a known fix).
 scan:image:
   stage: test
   # Use Trivy's own multi-arch image — it runs natively on the arm64
@@ -265,8 +265,8 @@ scan:image:
     - trivy image --platform linux/arm64 --exit-code 0 --severity HIGH,CRITICAL --format table $RUNTIME_IMAGE | tee scan-results/trivy-report.txt
     # SARIF artefact for the security dashboard.
     - trivy image --platform linux/arm64 --exit-code 0 --format sarif --output scan-results/trivy.sarif $RUNTIME_IMAGE
-    # Fail the job only on CRITICAL with a known fix.
-    - trivy image --platform linux/arm64 --exit-code 1 --severity CRITICAL --ignore-unfixed $RUNTIME_IMAGE
+    # Fail the job on CRITICAL or HIGH with a known fix.
+    - trivy image --platform linux/arm64 --exit-code 1 --severity CRITICAL,HIGH --ignore-unfixed $RUNTIME_IMAGE
   artifacts:
     when: always
     paths:
