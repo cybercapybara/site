@@ -17,7 +17,9 @@ set -euo pipefail
 CTX="${KUBE_CONTEXT:-admin@talos-nbg1}"
 NS="${DEMO_NAMESPACE:-env-demo}"
 RELEASE="${DEMO_RELEASE:-demo}"
-ADMIN_EMAIL="${DEMO_ADMIN_EMAIL:-demo@tarassov.me}"
+ADMIN_EMAIL="${DEMO_ADMIN_EMAIL:-admin@demo.tarassov.me}"
+# Fixed (not random) so it can be documented in the README; override if you fork.
+ADMIN_PASS="${DEMO_ADMIN_PASS:-DemoAdmin-2026}"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CHART="$ROOT/helm/cpp-env"
@@ -40,14 +42,12 @@ else
     DB_PASS="$(openssl rand -hex 24)"
     REDIS_PASS="$(openssl rand -hex 24)"
     JWT_SECRET="$(openssl rand -hex 32)"
-    ADMIN_PASS="$(openssl rand -base64 12 | tr -dc 'A-Za-z0-9' | cut -c1-14)"
     (
         umask 177
         cat >"$SECRETS" <<EOF
 DB_PASS=$DB_PASS
 REDIS_PASS=$REDIS_PASS
 JWT_SECRET=$JWT_SECRET
-ADMIN_PASS=$ADMIN_PASS
 EOF
     )
 fi

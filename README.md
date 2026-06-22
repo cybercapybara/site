@@ -18,8 +18,19 @@ and start writing endpoints instead of reinventing auth, rate limiting, tracing,
 to be forked as a base for real services; breaking changes follow SemVer. Issues
 and PRs welcome (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 
+## Live demo
+
+A throwaway public demo runs at **[app.demo.tarassov.me](https://app.demo.tarassov.me)** —
+register your own account, or sign in as **`admin@demo.tarassov.me`** /
+**`DemoAdmin-2026`** to explore the admin, RBAC, and audit features. Outgoing mail
+lands in a public [Mailpit inbox](https://mail.demo.tarassov.me) and requests are
+traced in [Jaeger](https://jaeger.demo.tarassov.me). It holds no real data and is
+reset periodically. Stood up with [`scripts/deploy-demo.sh`](scripts/deploy-demo.sh)
+(`helm/cpp-env/values-demo.yaml`).
+
 ## Contents
 
+- [Live demo](#live-demo)
 - [Why this template](#why-this-template)
 - [What's in the box](#whats-in-the-box)
 - [Quick start](#quick-start)
