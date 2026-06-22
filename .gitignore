@@ -133,3 +133,6 @@ helm/**/values-prod.yaml
 helm/*/charts/
 # Auto-generated dev JWT secret for make up-everything
 docker/.jwt-dev-secret
+
+# Demo env generated secrets (never commit)
+helm/cpp-env/.demo-secrets.env
