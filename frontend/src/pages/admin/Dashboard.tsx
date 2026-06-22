@@ -38,7 +38,7 @@ export function AdminDashboardPage() {
               <CardDescription>Create / edit / delete roles + permissions.</CardDescription>
             </CardHeader>
             <CardContent className="text-sm text-muted-foreground">
-              Bits map to <code>Domain::Permission::k*</code>.
+              Each role is a set of permissions; assign them to users.
             </CardContent>
           </Card>
         </Link>

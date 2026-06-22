@@ -14,6 +14,10 @@ and start writing endpoints instead of reinventing auth, rate limiting, tracing,
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
+**Status:** stable template (v1.x) — the structure and APIs are settled and meant
+to be forked as a base for real services; breaking changes follow SemVer. Issues
+and PRs welcome (see [CONTRIBUTING.md](CONTRIBUTING.md)).
+
 ## Contents
 
 - [Why this template](#why-this-template)
