@@ -1,0 +1,20 @@
+# CODEOWNERS — auto-assigned reviewers per path.
+# Syntax: https://docs.github.com/en/repositories/managing-your-repositories-settings-and-features/customizing-your-repository/about-code-owners
+# Order matters — later rules override earlier ones.
+
+# Default owners (catch-all).
+*                               @platform-team
+
+# Security-sensitive areas — require sign-off from security group.
+src/security/                   @platform-team @security-team
+src/api/Api.hpp                 @platform-team @security-team
+.clang-tidy                     @platform-team
+
+# Infrastructure.
+docker/                         @platform-team @devops-team
+helm/                           @platform-team @devops-team
+.gitlab-ci.yml                  @platform-team @devops-team
+.github/                        @platform-team @devops-team
+
+# Docs / API contract — product + engineering review.
+docs/openapi.yaml               @platform-team @product-team
