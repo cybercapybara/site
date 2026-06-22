@@ -176,4 +176,4 @@ First tagged release. Highlights of the pre-release hardening pass:
 - OpenSSL linked explicitly for HMAC-SHA256 (JWT signature) and SHA-256
   (Idempotency-Key body hash); constant-time compare via `CRYPTO_memcmp`.
 
-[Unreleased]: https://example.com/compare/master...HEAD
+[Unreleased]: https://gitlab.com/tarassov.me/cpp-rapid-rest-template/-/compare/v1.0.0...master
