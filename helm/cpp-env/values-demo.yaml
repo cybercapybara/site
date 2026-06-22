@@ -46,6 +46,11 @@ jaeger:
   ingress:
     enabled: true       # jaeger.demo — public traces of demo traffic (demo only)
 
+# Periodically reset the public demo back to a clean seeded state.
+demoReset:
+  enabled: true
+  schedule: "0 */6 * * *"   # every 6 hours
+
 cpp-api:
   image:
     tag: "4d575e58"     # pinned known-good amd64 build; bump when a newer one ships

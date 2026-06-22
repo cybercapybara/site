@@ -54,6 +54,16 @@ jaeger:
     # `kubectl port-forward svc/jaeger 16686` instead of a public ingress.
     enabled: false      # publish jaeger.<env> ingress (unauthenticated UI)
 
+# ── Demo reset (public demo only): periodically wipe user data + reseed so
+# abuse/clutter doesn't persist. OFF by default; values-demo.yaml enables it. ──
+demoReset:
+  enabled: false
+  schedule: "0 */6 * * *"           # every 6 hours
+  psqlImage: postgres:16-alpine
+  adminEmail: admin@demo.tarassov.me
+  adminPassword: DemoAdmin-2026      # demo admin is intentionally public (README)
+  seedCount: 8
+
 # ═══════════════════════════════════════════════════════════════
 # Subchart wiring — fixed in-namespace service names, mirrored creds.
 # ═══════════════════════════════════════════════════════════════
