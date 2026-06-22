@@ -83,7 +83,7 @@ the value here is the integration glue, and that glue assumes containers.
 - Structured logs via spdlog with the trace-id in each access log line.
 
 **Testing**
-- 215 unit/integration tests against real Postgres + Redis, bucketed by
+- 305 unit/integration tests against real Postgres + Redis, bucketed by
   explicit suite filters (`make test-unit` runs sidecar-free).
 - **HTTP end-to-end suite**: a real Drogon server + client exercising the
   whole middleware chain on the wire — auth gate, cookie sessions, refresh
@@ -93,7 +93,9 @@ the value here is the integration glue, and that glue assumes containers.
   permission mirror; `package-lock.json` committed for reproducible builds.
 
 **Ops**
-- Helm charts for both the API and the worker. `preStop` hook +
+- Helm charts for the API, worker, and frontend, plus a `cpp-env` umbrella that
+  deploys all three (with in-cluster Postgres/Redis/etc.) as one environment.
+  `preStop` hook +
   `terminationGracePeriodSeconds`, `ServiceMonitor`, opt-in `PrometheusRule`
   with baseline SLO alerts, opt-in `ExternalSecret` skeleton for Vault /
   AWS / GCP secret stores.
@@ -117,6 +119,9 @@ the value here is the integration glue, and that glue assumes containers.
   via signed timed link tokens (libsodium-derived per-purpose keys).
 - Admin user management (list / invite / detail / update / delete /
   roles) with self-protection (no self-delete, no self-role-change).
+- **Audit trail** (`audit_log`): every admin mutation on users and roles is
+  recorded; read it via `GET /api/admin/audit` (paginated + filterable by
+  action/actor/target/date), gated on a dedicated `kAuditRead` permission bit.
 - Email pipeline: SMTP via libcurl + inja templates; Mailpit dev
   sidecar at http://localhost:8025. Account emails are delivered through
   the jobs queue (`account_email` type, handled by
@@ -131,8 +136,8 @@ the value here is the integration glue, and that glue assumes containers.
   with openapi-typescript-generated types (codegen from `docs/openapi.yaml`).
 - All flask-base pages ported: Login / Register / Confirm / Unconfirmed
   / Profile / Change Password / Change Email / Reset Password / Admin
-  Dashboard / Users / User detail / Invite / Roles (CRUD), plus an admin
-  Jobs browser (paginated job list + DLQ requeue) beyond flask-base.
+  Dashboard / Users / User detail / Invite / Roles (CRUD), plus admin
+  Jobs (paginated list + DLQ requeue) and Audit-log browsers beyond flask-base.
 - HttpOnly-cookie auth, no JWT in localStorage. Same-origin via Vite
   proxy in dev and nginx in prod — no CORS gymnastics.
 - Lives in `frontend/` (monorepo); builds to its own image, deploys
@@ -303,10 +308,12 @@ in their security block.
 
 ## Adding an endpoint
 
-The template ships infrastructure controllers only (`HealthController`,
-`JobsController`). A worked example of a full CRUD stack — typed DTO +
-repository + controller + migration + test — lives in
-[`docs/EXAMPLES.md`](docs/EXAMPLES.md). Copy from there, don't try to
+The template already ships a full auth / RBAC / admin / audit domain
+(`AuthController`, `AccountController`, `AdminController`, `AuditController`)
+next to the infrastructure controllers (`HealthController`, `JobsController`) —
+you start from a working example, not a blank `src/api/`. For *your* resource, a
+worked CRUD stack — typed DTO + repository + controller + migration + test —
+lives in [`docs/EXAMPLES.md`](docs/EXAMPLES.md). Copy from there, don't try to
 invent it from scratch.
 
 1. Add the route to a controller (existing or new) under `src/api/`:
@@ -364,10 +371,13 @@ The app emits `OTLP_ENDPOINT`-tuned OTLP HTTP to whatever you configure; default
 
 ## Kubernetes
 
-Two charts:
+Four charts:
 
 - `helm/cpp-api` — the HTTP service
 - `helm/cpp-worker` — the background-job worker
+- `helm/cpp-frontend` — the React SPA (rootless nginx)
+- `helm/cpp-env` — umbrella that deploys all three as one environment (plus
+  in-cluster Postgres / Redis / Mailpit / Jaeger / Kafka); see `make helm-validate`
 
 Render locally:
 
@@ -402,7 +412,7 @@ src/
     Guards.hpp        handler guard macros (API_REQUIRE_ADMIN / _PRINCIPAL / _JOBS_READY)
     RequestUtils.hpp  parse_int, clamp_int, parse_page_params, is_valid_uuid, normalize_path_for_metrics
     Validation.hpp    composable request-body validators
-    *Controller.hpp   Built-in: HealthController, JobsController. Add your own with scripts/new-endpoint.sh; docs/EXAMPLES.md walks through a full Users CRUD.
+    *Controller.hpp   Built-in controllers: Auth, Account, Admin, Audit, Health, Jobs (full auth/admin domain). Add your own with scripts/new-endpoint.sh; docs/EXAMPLES.md walks through a full Users CRUD.
   cache/         Redis client (standalone or Sentinel HA)
   core/          Application lifecycle (init, health, shutdown)
   database/      Postgres pool + migrations
@@ -420,7 +430,7 @@ tests/
   e2e/           Real Drogon server + HTTP client (separate binary)
 
 docker/          Dockerfile + docker-compose.yml + env presets
-helm/            Helm charts (cpp-api, cpp-worker) with values.yaml documented
+helm/            Helm charts (cpp-api, cpp-worker, cpp-frontend + cpp-env umbrella), values documented
 scripts/         make-jwt.sh, smoke.sh, init-project.sh, bench.sh,
                  new-endpoint.sh (with --with-test / --patch-openapi),
                  new-migration.sh, check-openapi-drift.sh, lint-openapi.sh,
@@ -445,7 +455,7 @@ docs/            openapi.yaml, CONFIG.md, EXAMPLES.md, INDEX.md, adr/, Doxyfile
 | `make watch` | Rebuild + restart on `src/` change (entr or watchexec) |
 | `make coverage` | gcovr HTML report in `coverage/index.html` |
 | `make ci-local` | Reproduce CI locally: format check + drift + spectral + tidy + tests |
-| `make helm-lint` | `helm lint` + smoke `helm template` over both charts |
+| `make helm-lint` | `helm lint` + smoke `helm template` over all four charts |
 | `make routes` / `make health` | Print endpoint table / hit health probes |
 | `make psql` / `make redis-cli` | Open a shell against the running stack |
 | `make migrate` / `make migrate-local` / `make migrate-status` / `make migrate-reset` | Run (Docker or native) / inspect / nuke-and-reapply migrations |
