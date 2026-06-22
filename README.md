@@ -42,6 +42,10 @@ boring-but-mandatory production middleware, deployed via Docker/K8s.
 **Poor fit:** gRPC-first systems, GUI apps, embedded targets without Docker —
 the value here is the integration glue, and that glue assumes containers.
 
+Performance is the reason to be here, and it's hardware-specific — measure it on
+yours with `make bench`; [docs/BENCHMARKS.md](docs/BENCHMARKS.md) has the
+methodology and a results template.
+
 
 ## What's in the box
 
