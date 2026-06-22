@@ -322,7 +322,15 @@ coverage:          ## Build with coverage instrumentation, run tests, emit HTML 
 	@command -v gcovr >/dev/null 2>&1 || { echo "gcovr missing — pip install gcovr"; exit 1; }
 	cmake --preset coverage
 	cmake --build --preset coverage -j
+	@# Run EVERY bucket, not just unit — otherwise the report counts only the
+	@# unit-reachable code and badly understates the DB / cache / auth / jobs
+	@# paths that ONLY the integration + e2e buckets exercise. integration/e2e
+	@# need Postgres + Redis (run `make up` first); each is `|| true` so a missing
+	@# sidecar degrades the number instead of aborting the whole report.
+	@echo "==> running all test buckets (integration/e2e need Postgres+Redis — make up first)"
 	@./build/coverage/cpp_api_template_tests_unit --gtest_color=yes || true
+	@./build/coverage/cpp_api_template_tests_integration --gtest_color=yes || true
+	@./build/coverage/cpp_api_template_e2e --gtest_color=yes || true
 	@mkdir -p coverage
 	gcovr -r . --filter 'src/.*' --html-details coverage/index.html --print-summary
 	@echo "==> open coverage/index.html"
