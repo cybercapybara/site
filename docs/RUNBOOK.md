@@ -82,6 +82,26 @@ A downstream (DB/Redis) is failing past the retry budget.
 
 ---
 
+## Backups {#backup}
+
+Off by default — set `backup.enabled=true` and point `backup.s3.*` at a bucket.
+The CronJob (`backup-cronjob.yaml`) runs `pg_dump`, gzips it, **verifies the gzip
+(`gunzip -t`) and a non-trivial size before uploading**, so a failed dump aborts
+the Job instead of silently shipping a truncated file. Two alerts watch it (need
+kube-state-metrics): `CppApiBackupJobFailed` (last run failed) and
+`CppApiBackupTooOld` (no success within `monitoring.thresholds.backupMaxAgeSeconds`,
+default 26h).
+
+Verify a backup is real, don't just trust the green Job:
+
+```sh
+aws s3 ls s3://$BUCKET/ | tail        # a recent, non-tiny object exists
+aws s3 cp s3://$BUCKET/<latest>.sql.gz - | gunzip -t && echo "gzip OK"
+```
+
+Restore is a deliberate human action — see below. **Do a restore drill** before
+you depend on these backups; an untested backup is a guess.
+
 ## Restore Postgres {#restore}
 
 Backups (if `backup.enabled`) are `pg_dump` gzips in the configured S3 bucket
