@@ -1,6 +1,7 @@
 {
   "_comment": "Production profile: every security toggle ON, every dev convenience OFF. Validate with `make prod-check` before deploying. Secrets come ONLY from the environment — this file must never contain literal credentials.",
   "app": {
+    "env": "production",
     "name": "${APP_NAME}",
     "base_url": "${APP_BASE_URL}"
   },
