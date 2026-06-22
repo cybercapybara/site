@@ -37,6 +37,7 @@
 #include "security/Idempotency.hpp"
 #include "security/RateLimit.hpp"
 #include "utils/Config.hpp"
+#include "utils/Crypto.hpp"
 #include "utils/ErrorResponse.hpp"
 #include "utils/Strings.hpp"
 
@@ -137,7 +138,10 @@ inline void register_auth() {
             // Bearer mode is the legacy header-only path — kept verbatim.
             const auto& header = req->getHeader("Authorization");
             const std::string expected = "Bearer " + cfg.bearer_token;
-            return (header == expected) ? drogon::HttpResponsePtr{} : unauthorized("invalid_token");
+            // Constant-time compare: a plain `==` returns on the first differing
+            // byte, leaking the static token through response timing.
+            return Utils::Crypto::constant_time_equals(header, expected) ? drogon::HttpResponsePtr{}
+                                                                         : unauthorized("invalid_token");
         }
         // JWT — accept either the Authorization header or the configured
         // access cookie (cookie wins; SPAs never send the header). The
