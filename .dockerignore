@@ -1,0 +1,68 @@
+# Build artifacts
+build/
+cmake-build-*/
+out/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Documentation
+docs/html/
+docs/latex/
+README.md
+LICENSE
+CONTRIBUTING.md
+
+# CI/CD
+.gitlab-ci.yml
+.github/
+
+# Tests (kept in context for test-runner stage)
+Testing/
+test-results.xml
+coverage/
+
+# Logs
+logs/
+*.log
+
+# Dependencies
+vcpkg/
+vcpkg_installed/
+third_party/
+external/
+node_modules/
+
+# Docker
+docker/
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Environment
+.env
+*.env
+secrets/
+
+# Temporary
+*.tmp
+*.bak
+*.cache
+
+# flask-base reference project — 21MB, never copied into images
+_reference/
+
+# Large directories not needed by the C++ builder stage
+frontend/
+helm/
+scripts/

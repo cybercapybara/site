@@ -1,0 +1,132 @@
+{{- /*
+  PrometheusRule — bundles a minimum-viable alert set that pairs with the
+  ServiceMonitor. Requires the prometheus-operator CRDs installed in the
+  cluster.
+
+  IMPORTANT: metric selectors depend on how your prometheus-operator
+  installation labels scraped targets. Our ServiceMonitor sets
+  `app.kubernetes.io/name` / `app.kubernetes.io/instance`, and under the
+  default ServiceMonitor → Prometheus pipeline that surfaces as the
+  `job` label in a format like "{namespace}/{service}/{port-name}"
+  (operator default) or just "{service}" (older configs).
+
+  Rather than guess, we select on `service=` label that we emit ourselves
+  via the `monitoring.targetSelector` value. Override it in values.yaml
+  to match YOUR cluster's relabel config; the template comment below
+  documents the common shapes.
+*/}}
+{{- if .Values.monitoring.alertsEnabled }}
+{{- $selector := .Values.monitoring.targetSelector | default (printf "service=\"%s\"" (include "cpp-api.fullname" .)) }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "cpp-api.fullname" . }}
+  labels:
+    {{- include "cpp-api.labels" . | nindent 4 }}
+    {{- with .Values.monitoring.alertLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: {{ include "cpp-api.fullname" . }}.rules
+      interval: 30s
+      rules:
+        - alert: CppApiHighErrorRate
+          # Fires when >1% of HTTP responses are 5xx over a 5-min window.
+          expr: |
+            (
+              sum(rate(http_requests_total{ {{ $selector }}, status=~"5.."}[5m]))
+              /
+              clamp_min(sum(rate(http_requests_total{ {{ $selector }} }[5m])), 1)
+            ) > {{ .Values.monitoring.thresholds.errorRate | default 0.01 }}
+          for: 5m
+          labels:
+            severity: critical
+            service: {{ include "cpp-api.fullname" . }}
+          annotations:
+            runbook_url: "https://github.com/tarassov.me/cpp-rapid-rest-template/blob/master/docs/RUNBOOK.md#high5xx"
+            summary: "High 5xx rate on {{ include "cpp-api.fullname" . }}"
+            description: "More than {{ .Values.monitoring.thresholds.errorRate | default 0.01 }} of requests returned 5xx over 5m."
+
+        - alert: CppApiHighLatencyP99
+          expr: |
+            histogram_quantile(
+              0.99,
+              sum by (le) (rate(http_request_duration_seconds_bucket{ {{ $selector }} }[5m]))
+            ) > {{ .Values.monitoring.thresholds.latencyP99Sec | default 1 }}
+          for: 10m
+          labels:
+            severity: warning
+            service: {{ include "cpp-api.fullname" . }}
+          annotations:
+            runbook_url: "https://github.com/tarassov.me/cpp-rapid-rest-template/blob/master/docs/RUNBOOK.md#p99"
+            summary: "p99 latency over {{ .Values.monitoring.thresholds.latencyP99Sec | default 1 }}s"
+            description: "Investigate slow queries, pool saturation, or downstream latency."
+
+        - alert: CppApiPodNotReady
+          expr: |
+            kube_pod_status_ready{condition="true", namespace="{{ .Release.Namespace }}", pod=~"{{ include "cpp-api.fullname" . }}-.*"} == 0
+          for: 5m
+          labels:
+            severity: warning
+            service: {{ include "cpp-api.fullname" . }}
+          annotations:
+            runbook_url: "https://github.com/tarassov.me/cpp-rapid-rest-template/blob/master/docs/RUNBOOK.md#targetdown"
+            summary: "Pod not ready"
+            description: "A pod has been NotReady for 5 minutes — check logs and readiness probe."
+
+        - alert: CppApiCrashLoopBackOff
+          expr: |
+            rate(kube_pod_container_status_restarts_total{namespace="{{ .Release.Namespace }}", pod=~"{{ include "cpp-api.fullname" . }}-.*"}[15m]) > 0
+          for: 15m
+          labels:
+            severity: critical
+            service: {{ include "cpp-api.fullname" . }}
+          annotations:
+            runbook_url: "https://github.com/tarassov.me/cpp-rapid-rest-template/blob/master/docs/RUNBOOK.md#targetdown"
+            summary: "Container restarting"
+            description: "Container has restarted in the last 15 minutes."
+
+        - alert: CppApiRetriesExhaustedSpike
+          # Retries hitting max attempts consistently means a downstream is
+          # degraded but the app is soldiering on. Paired with retries_total
+          # counter from Retry::run.
+          expr: |
+            sum(rate(retries_total{ {{ $selector }}, outcome="exhausted"}[5m])) > {{ .Values.monitoring.thresholds.retriesExhaustedPerSec | default 0.5 }}
+          for: 10m
+          labels:
+            severity: warning
+            service: {{ include "cpp-api.fullname" . }}
+          annotations:
+            runbook_url: "https://github.com/tarassov.me/cpp-rapid-rest-template/blob/master/docs/RUNBOOK.md#retries"
+            summary: "Retries frequently exhausted"
+            description: "Downstream is likely degraded — investigate database / cache / messaging health."
+
+        {{- if .Values.monitoring.jobsAlerts }}
+        - alert: CppApiJobsDlqGrowing
+          # jobs_dlq_depth is labeled by type; the "_total" label is the aggregate.
+          expr: |
+            sum(jobs_dlq_depth{ {{ $selector }}, type="_total"}) > {{ .Values.monitoring.thresholds.dlqDepth | default 10 }}
+          for: 10m
+          labels:
+            severity: warning
+            service: {{ include "cpp-api.fullname" . }}
+          annotations:
+            runbook_url: "https://github.com/tarassov.me/cpp-rapid-rest-template/blob/master/docs/RUNBOOK.md#dlq"
+            summary: "Dead-letter queue depth over threshold"
+            description: "Investigate repeatedly-failing jobs — inspect /api/jobs/dlq and decide whether to requeue or discard."
+
+        - alert: CppApiJobsDlqSpikeByType
+          # One job type alone is accumulating a DLQ backlog fast.
+          expr: |
+            max by (type) (jobs_dlq_depth{ {{ $selector }}, type!="_total"}) > {{ .Values.monitoring.thresholds.dlqPerTypeDepth | default 5 }}
+          for: 10m
+          labels:
+            severity: warning
+            service: {{ include "cpp-api.fullname" . }}
+          annotations:
+            runbook_url: "https://github.com/tarassov.me/cpp-rapid-rest-template/blob/master/docs/RUNBOOK.md#dlq"
+            summary: "DLQ growing for job type {{`{{ $labels.type }}`}}"
+            description: "A specific job type keeps failing all retries — bug in the handler or a chronically-bad input."
+        {{- end }}
+{{- end }}
