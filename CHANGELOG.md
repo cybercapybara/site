@@ -6,6 +6,72 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-06-23
+
+Security hardening, saturation observability, and template/DX fixes. No
+breaking API changes — all new config keys have defaults / env fallbacks, so
+existing config files load unchanged.
+
+### Added
+- **Saturation metrics**: `db_pool_active_connections` + `db_pool_size`
+  (labeled by pool — the answer to "is the pool about to time out on
+  acquire?") and `jobs_queue_depth` (the waiting queue — a *leading* indicator,
+  unlike the lagging `jobs_dlq_depth`). New Prometheus alerts
+  `DbPoolSaturationHigh` and `JobsQueueBacklog` with RUNBOOK entries
+  (`#dbpool`, `#queuebacklog`) and the matching SLO rows.
+- **Opt-in CSRF** double-submit guard (`security.csrf.*`, off by default):
+  server middleware verifying a token header against a non-HttpOnly cookie on
+  cookie-authenticated mutations, with the SPA client wired to echo it.
+- **Stricter rate-limit tier** config for the auth surface
+  (`rate_limit.protected_requests` / `protected_window_sec` /
+  `protected_paths`).
+- `make` front doors: `make new-resource`, `make new-job`, `make init`.
+- Coverage gate: `make coverage` now fails under `COVERAGE_MIN`% line coverage
+  (default 40, a regression floor — override per-run).
+- `scripts/init-project.sh` gains an optional `[domain]` argument to rebrand
+  the host alongside the project name.
+
+### Changed
+- `with_repo_errors` is decoupled from the User/Role domain: repository
+  exceptions now derive from generic `Repositories::NotFoundError` /
+  `ConflictError` bases (`repositories/RepoErrors.hpp`), so the shared
+  controller plumbing no longer includes the demo repositories and a forked
+  domain's own exceptions map to the right status automatically.
+- `new-resource.sh` scaffolds the repository on `CrudBase` (the base whose
+  whole purpose is `find` / `list` / `count`) instead of hand-rolling them.
+- The scaffolders are now discoverable where forkers read — README "first
+  steps", `docs/INDEX.md`, and the Make-targets table — and `new-job.sh` is
+  executable.
+- `init-project.sh` verifies the rename itself (an independent broad scan that
+  exits non-zero listing any survivor) instead of printing a grep for you to
+  run.
+
+### Fixed
+- **Single-source version**: `CMakeLists.txt project() VERSION` was left at
+  `1.0.0` through the 1.1.0 release, so the binary mis-reported its version;
+  it now tracks the release.
+- Dead scaffolding instructions removed: the generated test + `new-resource.sh`
+  trailer + `docs/CONVENTIONS.md` no longer point at a non-existent
+  "INTEGRATION_FILTER / 5 places" bucket registration (buckets are classified
+  by directory).
+- `init-project.sh` no longer leaves the template name behind in the vcpkg
+  manifest (`vcpkg.json` was excluded by an over-broad `./vcpkg*` filter),
+  `.env.*` variants, and helm `NOTES.txt` — nor the author's `security@` /
+  demo host in a fork.
+
+### Security
+- **The public auth/account surface is now rate-limited.** `api.public_paths`
+  exempted login / register / refresh / password-reset from *both* auth and the
+  limiter, leaving them open to credential brute-force and mail-bombing. A
+  second, stricter per-IP tier (separate `rl:auth:` namespace) re-arms them; the
+  production profile enables it by default (10 req/60 s). Health/metrics/static
+  stay unthrottled. **Behavior change on upgrade:** a burst against the auth
+  endpoints now returns 429 — tune via `RATE_LIMIT_PROTECTED_REQUESTS`.
+- **Baseline HTTP security headers** on every response — `X-Content-Type-Options:
+  nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, a
+  locked-down CSP, and opt-in HSTS (`security.hsts`, on in the production
+  profile) — set both in the app and at the nginx edge for the SPA.
+
 ## [1.1.0] — 2026-06-23
 
 Pre-release hardening + a public demo. No breaking API changes.
@@ -209,5 +275,6 @@ First tagged release. Highlights of the pre-release hardening pass:
 - OpenSSL linked explicitly for HMAC-SHA256 (JWT signature) and SHA-256
   (Idempotency-Key body hash); constant-time compare via `CRYPTO_memcmp`.
 
-[Unreleased]: https://gitlab.com/tarassov.me/cpp-rapid-rest-template/-/compare/v1.1.0...master
+[Unreleased]: https://gitlab.com/tarassov.me/cpp-rapid-rest-template/-/compare/v1.2.0...master
+[1.2.0]: https://gitlab.com/tarassov.me/cpp-rapid-rest-template/-/compare/v1.1.0...v1.2.0
 [1.1.0]: https://gitlab.com/tarassov.me/cpp-rapid-rest-template/-/compare/v1.0.0...v1.1.0
