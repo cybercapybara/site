@@ -16,20 +16,23 @@
 #include "database/Database.hpp"
 #include "domain/Role.hpp"
 #include "repositories/CrudBase.hpp"
+#include "repositories/RepoErrors.hpp"
 #include "repositories/SqlErrors.hpp"
 
 namespace Repositories {
 
-struct DuplicateRole : std::runtime_error {
-    DuplicateRole() : std::runtime_error("role name already exists") {}
+// Stable 409 codes / 404 resource carried on the exception, so with_repo_errors()
+// maps them without including this header.
+struct DuplicateRole : ConflictError {
+    DuplicateRole() : ConflictError("role_exists", "A role with that name already exists") {}
 };
 
-struct RoleNotFound : std::runtime_error {
-    RoleNotFound() : std::runtime_error("role not found") {}
+struct RoleNotFound : NotFoundError {
+    RoleNotFound() : NotFoundError("role") {}
 };
 
-struct RoleInUse : std::runtime_error {
-    RoleInUse() : std::runtime_error("role is referenced by one or more users") {}
+struct RoleInUse : ConflictError {
+    RoleInUse() : ConflictError("role_in_use", "Reassign users away from this role before deleting") {}
 };
 
 class RoleRepository : public CrudBase<RoleRepository, Domain::Role, int> {

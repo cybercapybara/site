@@ -12,6 +12,12 @@
  *          exceptions, it does not know about HTTP); this helper is the api-
  *          side translation of those types — the natural counterpart to
  *          Repositories::detail::translate_sql (SQLSTATE -> exception).
+ *
+ *          It catches the GENERIC bases (Repositories::NotFoundError /
+ *          ConflictError, defined in RepoErrors.hpp), NOT the concrete domain
+ *          exceptions — so this header does not depend on UserRepository /
+ *          RoleRepository, and a forked domain's own NotFoundError/ConflictError
+ *          subclasses map automatically with no edit here.
  */
 
 #pragma once
@@ -22,9 +28,7 @@
 #include <drogon/HttpResponse.h>
 #include <spdlog/spdlog.h>
 
-#include "repositories/RoleRepository.hpp"
-#include "repositories/SqlErrors.hpp"
-#include "repositories/UserRepository.hpp"
+#include "repositories/RepoErrors.hpp"
 #include "utils/ErrorResponse.hpp"
 
 namespace Api {
@@ -36,7 +40,8 @@ namespace Api {
  *        without throwing — handlers that must keep running after the guarded
  *        block (e.g. to send a success response) can branch on it.
  *
- * Codes are the stable machine codes asserted by tests:
+ * The concrete domain exceptions carry their own code/resource and derive
+ * from these bases, so the same stable machine codes the tests assert hold:
  *   DuplicateEmail -> 409 email_taken | UserNotFound -> 404 user
  *   DuplicateRole  -> 409 role_exists | RoleNotFound -> 404 role
  *   RoleInUse      -> 409 role_in_use | anything else -> 500
@@ -46,16 +51,10 @@ inline bool with_repo_errors(const std::function<void(const drogon::HttpResponse
     try {
         fn();
         return true;
-    } catch (const Repositories::DuplicateEmail&) {
-        cb(ErrorResponse::conflict("email_taken", "Email is already registered"));
-    } catch (const Repositories::UserNotFound&) {
-        cb(ErrorResponse::not_found("user"));
-    } catch (const Repositories::DuplicateRole&) {
-        cb(ErrorResponse::conflict("role_exists", "A role with that name already exists"));
-    } catch (const Repositories::RoleNotFound&) {
-        cb(ErrorResponse::not_found("role"));
-    } catch (const Repositories::RoleInUse&) {
-        cb(ErrorResponse::conflict("role_in_use", "Reassign users away from this role before deleting"));
+    } catch (const Repositories::ConflictError& e) {
+        cb(ErrorResponse::conflict(e.code(), e.message()));
+    } catch (const Repositories::NotFoundError& e) {
+        cb(ErrorResponse::not_found(e.resource()));
     } catch (const std::exception& e) {
         spdlog::error("{} failed: {}", op, e.what());
         cb(ErrorResponse::internal_error());
