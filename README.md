@@ -3,8 +3,9 @@
 Enterprise baseline for a C++20 REST service. Fork it, point it at your Postgres/Redis,
 and start writing endpoints instead of reinventing auth, rate limiting, tracing, and DLQs.
 
-<!-- Live badges point at the canonical repo; init-project.sh renames the
-     project part — update the host/namespace if your fork lives elsewhere. -->
+<!-- Live badges point at the canonical repo. init-project.sh rebrands both the
+     project name AND the host (pass your domain as the 3rd arg) and then fails
+     if any template/author token survived — so a fork won't ship these links. -->
 [![pipeline](https://gitlab.com/tarassov.me/cpp-rapid-rest-template/badges/master/pipeline.svg)](https://gitlab.com/tarassov.me/cpp-rapid-rest-template/-/pipelines)
 [![release](https://gitlab.com/tarassov.me/cpp-rapid-rest-template/-/badges/release.svg)](https://gitlab.com/tarassov.me/cpp-rapid-rest-template/-/releases)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)
