@@ -36,6 +36,26 @@ inline constexpr const char* kDefaultPublicPathsCsv =
     "/api/account/join-from-invite/*";
 
 /**
+ * @brief Public endpoints that must STILL be rate-limited despite being
+ *        auth-public. These are the brute-force / mail-bombing surfaces:
+ *        login & register (credential stuffing), refresh (token churn),
+ *        reset-password-request (mail bomb), and the token-bearing links
+ *        (reset / confirm / change-email / invite — guessable-token attempts).
+ *
+ * This is the auth/account subset of kDefaultPublicPathsCsv minus the infra
+ * and static surface (`/`, `/healthz`, `/ready`, `/health`, `/metrics`,
+ * `/api/docs`, `/api/openapi.yaml`), which we never want to throttle. The
+ * general limiter skips everything in api.public_paths; without this list the
+ * auth surface would be skipped too, leaving it wide open. Matched the same
+ * way as public paths (exact, or trailing `*` prefix).
+ */
+inline constexpr const char* kDefaultProtectedPathsCsv =
+    "/api/auth/login,/api/auth/register,/api/auth/refresh,"
+    "/api/account/confirm/*,/api/account/reset-password-request,"
+    "/api/account/reset-password/*,/api/account/change-email/*,"
+    "/api/account/join-from-invite/*";
+
+/**
  * @brief True if @p path is covered by @p public_paths — exact match, or a
  *        prefix match for an entry ending in `*`. Shared by Auth / RateLimit /
  *        Idempotency so they can't disagree about what's public.
