@@ -70,6 +70,10 @@
   "docs": {
     "enabled": false
   },
+  "security": {
+    "hsts": true,
+    "hsts_max_age": 31536000
+  },
   "auth": {
     "mode": "jwt",
     "cookies": {

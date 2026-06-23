@@ -47,6 +47,7 @@ inline void register_controllers() {
     middleware::register_rate_limit();
     middleware::register_idempotency();
     middleware::register_cors();
+    middleware::register_security_headers();
     middleware::register_tracing_pre();
     middleware::register_access_log_post();
     register_docs_endpoints();

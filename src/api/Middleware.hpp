@@ -294,6 +294,38 @@ inline void register_cors() {
 }
 
 /**
+ * @brief Stamp baseline security headers on every response.
+ * @details API responses are JSON, so the CSP is locked all the way down
+ *          (default-src 'none') — nothing should ever execute or embed from an
+ *          API origin. The SPA's own HTML/CSP is set at the edge (nginx). HSTS
+ *          is opt-in (security.hsts): it's only honoured over HTTPS, but gating
+ *          it keeps it out of plain-http dev. set_if_absent never clobbers a
+ *          header a handler deliberately set.
+ */
+inline void register_security_headers() {
+    bool hsts = false;
+    int hsts_max_age = 31536000;
+    if (Config::is_initialized()) {
+        hsts = Config::get().get<bool>("security.hsts", "SECURITY_HSTS", false);
+        hsts_max_age = Config::get().get<int>("security.hsts_max_age", "SECURITY_HSTS_MAX_AGE", 31536000);
+    }
+    drogon::app().registerPostHandlingAdvice(
+        [hsts, hsts_max_age](const drogon::HttpRequestPtr&, const drogon::HttpResponsePtr& resp) {
+            auto set_if_absent = [&](const char* key, const std::string& value) {
+                if (resp->getHeader(key).empty())
+                    resp->addHeader(key, value);
+            };
+            set_if_absent("X-Content-Type-Options", "nosniff");
+            set_if_absent("X-Frame-Options", "DENY");
+            set_if_absent("Referrer-Policy", "no-referrer");
+            set_if_absent("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
+            if (hsts)
+                set_if_absent("Strict-Transport-Security",
+                              "max-age=" + std::to_string(hsts_max_age) + "; includeSubDomains");
+        });
+}
+
+/**
  * @brief Holds the RuntimeContext token that marks the request's span as
  *        the ACTIVE one on this thread, so child spans (db.*) nest under
  *        it. Stored in request attributes (shared_ptr — attributes need

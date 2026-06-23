@@ -95,6 +95,10 @@
     "enabled": "${DOCS_ENABLED:-false}",
     "openapi_path": "docs/openapi.yaml"
   },
+  "security": {
+    "hsts": "${SECURITY_HSTS:-false}",
+    "hsts_max_age": 31536000
+  },
   "auth": {
     "mode": "${AUTH_MODE:-none}",
     "bearer_token": "${AUTH_BEARER_TOKEN:-}",
