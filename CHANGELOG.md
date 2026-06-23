@@ -32,7 +32,10 @@ Pre-release hardening + a public demo. No breaking API changes.
   of silently shipping a truncated one, with failure/staleness alerts;
   `seccompProfile` on all pods; single-replica PodDisruptionBudgets no longer
   wedge node drains; `make coverage` runs every test bucket.
-- **CI:** Trivy fails on HIGH as well as CRITICAL; all GitHub Actions pinned to SHAs.
+- **CI:** Trivy fails on HIGH as well as CRITICAL; all GitHub Actions pinned to
+  SHAs; the tag-release image job promotes the natively-built per-arch images
+  into the `:vX.Y.Z` manifest instead of a QEMU rebuild (which segfaulted
+  emulating amd64).
 - **Docs:** corrected the README inventory, a non-existent module in an ADR, a
   migration-skeleton trap, dead clone/CI links, and a CHANGELOG contradiction.
 
