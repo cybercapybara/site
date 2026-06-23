@@ -85,6 +85,13 @@ if [[ "$(jq -r '.rate_limit.fail_open' "$CONFIG")" == "false" ]]; then
 else
     fail "rate_limit.fail_open must be false (Redis outage must not disable the limiter)"
 fi
+# The auth/account surface is public (no JWT) but must still be throttled, or
+# login/register/reset are wide open to brute-force / mail-bombing.
+if [[ "$(jq -r '.rate_limit.protected_requests // "null"' "$CONFIG")" != "null" ]]; then
+    pass "rate_limit.protected_requests set (login/register/reset throttled)"
+else
+    fail "rate_limit.protected_requests must be set so the public auth endpoints are rate-limited"
+fi
 
 # 5. Swagger UI off.
 DOCS=$(resolved '.docs.enabled' 'DOCS_ENABLED')

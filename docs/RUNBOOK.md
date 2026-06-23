@@ -80,6 +80,31 @@ A downstream (DB/Redis) is failing past the retry budget.
    outage shows as login failures + rate-limit fail-closed (if configured).
 3. DB: see [HighP99Latency](#p99) / [ApiTargetDown](#targetdown).
 
+## JobsQueueBacklog {#queuebacklog}
+
+The waiting queue (`jobs_queue_depth{type="_total"}`) is deep and not draining —
+submitters are outrunning the worker pool. This is the *leading* signal; left
+alone, jobs eventually age into the DLQ ([DeadLetterQueueGrowing](#dlq)).
+
+1. Which type? `jobs_queue_depth` is labeled by `type`.
+2. Workers alive and consuming? Check `up{job="cpp_worker"}` and the worker
+   logs. A stuck handler (one slow job type blocking its thread) starves the
+   rest — BRPOP concurrency equals the thread count.
+3. Genuine load spike? Scale worker replicas / `WORKER_CONCURRENCY`.
+
+## DbPoolSaturationHigh {#dbpool}
+
+A connection pool is over 90% utilized (`db_pool_active_connections /
+db_pool_size`). At saturation, `acquire()` blocks up to the acquire timeout and
+then throws — surfacing as 5xx and high p99.
+
+1. Which pool? The alert is labeled `pool` (primary/replica).
+2. Slow queries holding connections? Check the DB's `pg_stat_activity` and the
+   `db.statement` attribute on slow `db.*` spans.
+3. Real concurrency demand? Raise `DATABASE_POOL_SIZE` (and the server's
+   `max_connections`), or shed load. A leaked connection (active stuck high
+   while traffic is idle) points at a handler that never returns its txn.
+
 ---
 
 ## Backups {#backup}

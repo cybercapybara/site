@@ -4,6 +4,11 @@
 -include project.env
 PROJECT_NAME ?= cpp-rapid-rest-template
 REGISTRY     ?= docker.io/library
+# Minimum src/ LINE coverage for `make coverage` to pass — a regression floor,
+# not a target. Start conservative; raise it once you've measured your real
+# number (run `make coverage` and read the printed summary). Override per-run:
+# `make coverage COVERAGE_MIN=55`.
+COVERAGE_MIN ?= 40
 
 IMAGE     := $(REGISTRY)/$(PROJECT_NAME)
 GIT_SHA   := $(shell git rev-parse --short HEAD)
@@ -318,7 +323,7 @@ watch:             ## Rebuild + restart on src/ change (needs entr or watchexec)
 		exit 1 ; \
 	fi
 
-coverage:          ## Build with coverage instrumentation, run tests, emit HTML at coverage/index.html
+coverage:          ## Build with coverage, run tests, emit HTML + fail under COVERAGE_MIN% line coverage
 	@command -v gcovr >/dev/null 2>&1 || { echo "gcovr missing — pip install gcovr"; exit 1; }
 	cmake --preset coverage
 	cmake --build --preset coverage -j
@@ -332,8 +337,12 @@ coverage:          ## Build with coverage instrumentation, run tests, emit HTML 
 	@./build/coverage/cpp_api_template_tests_integration --gtest_color=yes || true
 	@./build/coverage/cpp_api_template_e2e --gtest_color=yes || true
 	@mkdir -p coverage
-	gcovr -r . --filter 'src/.*' --html-details coverage/index.html --print-summary
-	@echo "==> open coverage/index.html"
+	@# --fail-under-line makes this a gate: gcovr exits non-zero (failing the
+	@# target / CI) when src/ line coverage drops below COVERAGE_MIN. A floor,
+	@# not a ceiling — bump COVERAGE_MIN as real coverage climbs.
+	gcovr -r . --filter 'src/.*' --html-details coverage/index.html --print-summary \
+		--fail-under-line $(COVERAGE_MIN)
+	@echo "==> open coverage/index.html (line floor: $(COVERAGE_MIN)%)"
 
 # ── Inspection / health ──────────────────────────────────────────
 
@@ -412,6 +421,18 @@ new-endpoint:      ## Scaffold a controller: make new-endpoint NAME=Orders METHO
 new-migration:     ## Generate the next migrations/NNN_<slug>.sql: make new-migration SLUG=add_users
 	@if [ -z "$(SLUG)" ]; then echo "Usage: make new-migration SLUG=<short_description>"; exit 1; fi
 	./scripts/new-migration.sh $(SLUG)
+
+new-resource:      ## Scaffold a full CRUD resource: make new-resource ENTITY=Product
+	@if [ -z "$(ENTITY)" ]; then echo "Usage: make new-resource ENTITY=Product   (singular PascalCase)"; exit 1; fi
+	./scripts/new-resource.sh $(ENTITY)
+
+new-job:           ## Scaffold a background-job handler: make new-job TYPE=reindex [HANDLER=ReindexJob]
+	@if [ -z "$(TYPE)" ]; then echo "Usage: make new-job TYPE=reindex [HANDLER=ReindexJob]"; exit 1; fi
+	./scripts/new-job.sh $(TYPE) $(HANDLER)
+
+init:              ## Rebrand the template for your fork: make init NAME=my-service [REGISTRY=docker.io/myorg]
+	@if [ -z "$(NAME)" ]; then echo "Usage: make init NAME=my-service [REGISTRY=docker.io/myorg]"; exit 1; fi
+	./scripts/init-project.sh $(NAME) $(REGISTRY)
 
 seed:              ## Apply optional seed fixtures from migrations/seeds/*.sql (idempotent at your risk)
 	@if ! ls migrations/seeds/*.sql >/dev/null 2>&1; then \

@@ -70,6 +70,15 @@
   "docs": {
     "enabled": false
   },
+  "security": {
+    "hsts": true,
+    "hsts_max_age": 31536000,
+    "csrf": {
+      "enabled": "${SECURITY_CSRF_ENABLED:-false}",
+      "cookie_name": "csrf-token",
+      "header_name": "X-CSRF-Token"
+    }
+  },
   "auth": {
     "mode": "jwt",
     "cookies": {
@@ -102,6 +111,8 @@
     "enabled": true,
     "requests": "${RATE_LIMIT_REQUESTS:-120}",
     "window_sec": 60,
+    "protected_requests": "${RATE_LIMIT_PROTECTED_REQUESTS:-10}",
+    "protected_window_sec": 60,
     "scope": "ip_or_user",
     "trust_proxy": true,
     "fail_open": false,

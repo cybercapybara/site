@@ -127,6 +127,7 @@ public:
                 init_messaging_(cfg);
                 Tasks::initialize();
                 register_token_reaper_();
+                register_db_pool_metric_(cfg);
             }
             init_security_();
             init_jobs_(cfg);
@@ -402,6 +403,67 @@ private:
         });
     }
 
+    // Registers jobs_queue_depth as a Prometheus gauge, labeled by job type
+    // (special label type="_total" for the aggregate). The LEADING indicator
+    // of saturation — a climbing waiting-queue means submitters are outrunning
+    // the worker pool, visible long before anything lands in the DLQ. Mirrors
+    // register_dlq_metric_ exactly, over jobs:queue:* instead of jobs:dlq:*.
+    static void register_queue_depth_metric_(Config::AppConfig& cfg) {
+        if (!Observability::is_initialized() || !Tasks::is_initialized())
+            return;
+        auto& family = Observability::get().metrics().create_gauge("jobs_queue_depth",
+                                                                   "Current depth of the waiting jobs queue by type "
+                                                                   "(special label type=\"_total\" for the aggregate)");
+        int refresh_sec = cfg.get<int>("jobs.queue_metric_refresh_sec", "JOBS_QUEUE_METRIC_REFRESH_SEC", 10);
+        // Same drain-to-zero bookkeeping as the DLQ gauge: queue_depth_by_type()
+        // omits empty types, so a queue that drains would otherwise stick at its
+        // last value.
+        auto ever_seen = std::make_shared<std::unordered_set<std::string>>();
+        Tasks::schedule_recurring("jobs_queue_depth_refresh", std::chrono::seconds(refresh_sec), [&family, ever_seen] {
+            if (!Observability::is_initialized() || !Jobs::is_initialized())
+                return;
+            auto per_type = Jobs::get().queue_depth_by_type();
+            long total = 0;
+            for (const auto& [type, depth] : per_type) {
+                family.Add({{"type", type}}).Set(static_cast<double>(depth));
+                ever_seen->insert(type);
+                total += depth;
+            }
+            for (const auto& type : *ever_seen) {
+                if (per_type.find(type) == per_type.end())
+                    family.Add({{"type", type}}).Set(0.0);
+            }
+            family.Add({{"type", "_total"}}).Set(static_cast<double>(total));
+        });
+    }
+
+    // Registers db_pool_active_connections + db_pool_size gauges, labeled by
+    // pool (primary/replica). Saturation = active / size → 1.0 means acquire()
+    // is about to start timing out; it's the cause the HighP99Latency alert
+    // tells operators to check first. Refreshed every N seconds (the counts
+    // are cheap atomics — no DB round-trip).
+    static void register_db_pool_metric_(Config::AppConfig& cfg) {
+        if (!Observability::is_initialized() || !Tasks::is_initialized() || !Database::is_initialized())
+            return;
+        auto& active_family = Observability::get().metrics().create_gauge(
+            "db_pool_active_connections", "In-use database connections by pool (saturation = this / db_pool_size)");
+        auto& size_family = Observability::get().metrics().create_gauge(
+            "db_pool_size", "Configured database connection pool size by pool");
+        int refresh_sec = cfg.get<int>("database.pool_metric_refresh_sec", "DB_POOL_METRIC_REFRESH_SEC", 10);
+        Tasks::schedule_recurring(
+            "db_pool_metric_refresh", std::chrono::seconds(refresh_sec), [&active_family, &size_family] {
+                if (!Observability::is_initialized() || !Database::is_initialized())
+                    return;
+                auto& db = Database::get();
+                active_family.Add({{"pool", "primary"}}).Set(static_cast<double>(db.primary_pool_active()));
+                size_family.Add({{"pool", "primary"}}).Set(static_cast<double>(db.primary_pool_size()));
+                if (db.replica_count() > 0) {
+                    active_family.Add({{"pool", "replica"}}).Set(static_cast<double>(db.replica_pool_active()));
+                    size_family.Add({{"pool", "replica"}}).Set(static_cast<double>(db.replica_pool_size()));
+                }
+            });
+    }
+
     // Periodically prune expired single-use token nonces (used_tokens,
     // migration 002). Unlike the old Redis TTL nonce these rows are permanent,
     // so without a reaper the table + its index grow monotonically.
@@ -444,6 +506,7 @@ private:
         int retries = cfg.get<int>("jobs.max_retries", "JOBS_MAX_RETRIES", 3);
         Jobs::initialize(ttl, retries);
         register_dlq_metric_(cfg);
+        register_queue_depth_metric_(cfg);
     }
 
 public:

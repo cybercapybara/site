@@ -609,6 +609,27 @@ public:
     }
 
     bool is_initialized() const { return initialized_; }
+
+    // ── Pool saturation introspection ─────────────────────────────────────
+    // The connection pool already tracks active_count()/size(); these surface
+    // them so Core can export db_pool_* gauges. Saturation (active/size → 1.0)
+    // is the leading indicator that acquire() is about to start timing out —
+    // the cause the HighP99Latency alert tells operators to check first.
+    size_t primary_pool_active() const { return primary_pool_ ? primary_pool_->active_count() : 0; }
+    size_t primary_pool_size() const { return primary_pool_ ? primary_pool_->size() : 0; }
+    size_t replica_count() const { return replica_pools_.size(); }
+    size_t replica_pool_active() const {
+        size_t n = 0;
+        for (const auto& r : replica_pools_)
+            n += r->active_count();
+        return n;
+    }
+    size_t replica_pool_size() const {
+        size_t n = 0;
+        for (const auto& r : replica_pools_)
+            n += r->size();
+        return n;
+    }
 };
 
 /**

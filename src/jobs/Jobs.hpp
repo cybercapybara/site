@@ -433,6 +433,38 @@ public:
     }
 
     /**
+     * @brief Live depth per job type for the WAITING queue (`jobs:queue:*`),
+     *        as {type → depth}. The leading-indicator counterpart to
+     *        dlq_depth_by_type (which is the lagging "already gave up" signal):
+     *        a climbing queue depth means submitters are outrunning the
+     *        worker pool before anything reaches the DLQ. Used by the metrics
+     *        refresher so dashboards/alerts can see a backlog forming.
+     */
+    std::unordered_map<std::string, long> queue_depth_by_type() {
+        std::unordered_map<std::string, long> out;
+        if (!initialized_)
+            return out;
+        try {
+            auto& redis = Cache::get().get_client();
+            long long cursor = 0;
+            do {
+                std::vector<std::string> batch;
+                cursor = redis.scan(cursor, "jobs:queue:*", 100, std::back_inserter(batch));
+                for (auto& k : batch) {
+                    long long len = redis.llen(k);
+                    // strip "jobs:queue:" prefix
+                    const std::string prefix = "jobs:queue:";
+                    std::string type = k.rfind(prefix, 0) == 0 ? k.substr(prefix.size()) : k;
+                    out[std::move(type)] = static_cast<long>(len);
+                }
+            } while (cursor != 0);
+        } catch (const std::exception& e) {
+            spdlog::warn("queue_depth_by_type: scan failed: {}", e.what());
+        }
+        return out;
+    }
+
+    /**
      * @brief Return any jobs left in this worker's processing list to the
      *        live queue. Call once at worker startup: if the previous
      *        instance with the same WORKER_ID crashed between BRPOPLPUSH
