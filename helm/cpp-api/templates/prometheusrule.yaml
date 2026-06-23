@@ -44,7 +44,7 @@ spec:
             severity: critical
             service: {{ include "cpp-api.fullname" . }}
           annotations:
-            runbook_url: "https://github.com/tarassov.me/cpp-rapid-rest-template/blob/master/docs/RUNBOOK.md#high5xx"
+            runbook_url: "https://gitlab.com/tarassov.me/cpp-rapid-rest-template/-/blob/master/docs/RUNBOOK.md#high5xx"
             summary: "High 5xx rate on {{ include "cpp-api.fullname" . }}"
             description: "More than {{ .Values.monitoring.thresholds.errorRate | default 0.01 }} of requests returned 5xx over 5m."
 
@@ -59,7 +59,7 @@ spec:
             severity: warning
             service: {{ include "cpp-api.fullname" . }}
           annotations:
-            runbook_url: "https://github.com/tarassov.me/cpp-rapid-rest-template/blob/master/docs/RUNBOOK.md#p99"
+            runbook_url: "https://gitlab.com/tarassov.me/cpp-rapid-rest-template/-/blob/master/docs/RUNBOOK.md#p99"
             summary: "p99 latency over {{ .Values.monitoring.thresholds.latencyP99Sec | default 1 }}s"
             description: "Investigate slow queries, pool saturation, or downstream latency."
 
@@ -71,7 +71,7 @@ spec:
             severity: warning
             service: {{ include "cpp-api.fullname" . }}
           annotations:
-            runbook_url: "https://github.com/tarassov.me/cpp-rapid-rest-template/blob/master/docs/RUNBOOK.md#targetdown"
+            runbook_url: "https://gitlab.com/tarassov.me/cpp-rapid-rest-template/-/blob/master/docs/RUNBOOK.md#targetdown"
             summary: "Pod not ready"
             description: "A pod has been NotReady for 5 minutes — check logs and readiness probe."
 
@@ -83,7 +83,7 @@ spec:
             severity: critical
             service: {{ include "cpp-api.fullname" . }}
           annotations:
-            runbook_url: "https://github.com/tarassov.me/cpp-rapid-rest-template/blob/master/docs/RUNBOOK.md#targetdown"
+            runbook_url: "https://gitlab.com/tarassov.me/cpp-rapid-rest-template/-/blob/master/docs/RUNBOOK.md#targetdown"
             summary: "Container restarting"
             description: "Container has restarted in the last 15 minutes."
 
@@ -98,7 +98,7 @@ spec:
             severity: warning
             service: {{ include "cpp-api.fullname" . }}
           annotations:
-            runbook_url: "https://github.com/tarassov.me/cpp-rapid-rest-template/blob/master/docs/RUNBOOK.md#retries"
+            runbook_url: "https://gitlab.com/tarassov.me/cpp-rapid-rest-template/-/blob/master/docs/RUNBOOK.md#retries"
             summary: "Retries frequently exhausted"
             description: "Downstream is likely degraded — investigate database / cache / messaging health."
 
@@ -112,7 +112,7 @@ spec:
             severity: warning
             service: {{ include "cpp-api.fullname" . }}
           annotations:
-            runbook_url: "https://github.com/tarassov.me/cpp-rapid-rest-template/blob/master/docs/RUNBOOK.md#dlq"
+            runbook_url: "https://gitlab.com/tarassov.me/cpp-rapid-rest-template/-/blob/master/docs/RUNBOOK.md#dlq"
             summary: "Dead-letter queue depth over threshold"
             description: "Investigate repeatedly-failing jobs — inspect /api/jobs/dlq and decide whether to requeue or discard."
 
@@ -125,8 +125,37 @@ spec:
             severity: warning
             service: {{ include "cpp-api.fullname" . }}
           annotations:
-            runbook_url: "https://github.com/tarassov.me/cpp-rapid-rest-template/blob/master/docs/RUNBOOK.md#dlq"
+            runbook_url: "https://gitlab.com/tarassov.me/cpp-rapid-rest-template/-/blob/master/docs/RUNBOOK.md#dlq"
             summary: "DLQ growing for job type {{`{{ $labels.type }}`}}"
             description: "A specific job type keeps failing all retries — bug in the handler or a chronically-bad input."
+
+        {{- if .Values.backup.enabled }}
+        - alert: CppApiBackupJobFailed
+          # The pg_dump CronJob's most recent run failed. Needs kube-state-metrics.
+          expr: |
+            max(kube_job_status_failed{job_name=~"{{ include "cpp-api.fullname" . }}-backup.*"}) > 0
+          for: 5m
+          labels:
+            severity: warning
+            service: {{ include "cpp-api.fullname" . }}
+          annotations:
+            runbook_url: "https://gitlab.com/tarassov.me/cpp-rapid-rest-template/-/blob/master/docs/RUNBOOK.md#backup"
+            summary: "Postgres backup CronJob failed"
+            description: "The latest backup Job failed — no fresh dump was uploaded. Check the Job logs; do not assume a recoverable backup exists."
+
+        - alert: CppApiBackupTooOld
+          # No successful backup within the staleness window (default 26h for a
+          # daily schedule). Catches a CronJob that is silently broken or descheduled.
+          expr: |
+            time() - max(kube_job_status_completion_time{job_name=~"{{ include "cpp-api.fullname" . }}-backup.*"}) > {{ .Values.monitoring.thresholds.backupMaxAgeSeconds | default 93600 }}
+          for: 15m
+          labels:
+            severity: warning
+            service: {{ include "cpp-api.fullname" . }}
+          annotations:
+            runbook_url: "https://gitlab.com/tarassov.me/cpp-rapid-rest-template/-/blob/master/docs/RUNBOOK.md#backup"
+            summary: "No recent Postgres backup"
+            description: "No successful backup completed within the staleness window — the CronJob may be broken or no longer scheduled."
+        {{- end }}
         {{- end }}
 {{- end }}

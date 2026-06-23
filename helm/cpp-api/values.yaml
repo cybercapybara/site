@@ -293,7 +293,7 @@ server:
 #      AUTH_COOKIE_SECURE, AUTH_COOKIE_SAMESITE
 # ---------------------------------------------------------------
 auth:
-  mode: none           # none | bearer | jwt
+  mode: jwt            # none | bearer | jwt — default jwt so a bare subchart install never ships a public API; an empty jwtSecret then fail-closes at boot
   jwtSecret: ""        # HS256 signing key — set via --set auth.jwtSecret=...
   jwtIssuer: ""
   jwtAudience: ""
@@ -315,6 +315,7 @@ auth:
 # Env vars set: APP_BASE_URL, APP_NAME
 # ---------------------------------------------------------------
 app:
+  env: production      # APP_ENV — arms the boot-time prod-safety guard (refuses auth.mode=none in prod)
   baseUrl: "https://app.example.com"  # base for confirm/reset links in emails
   name: App
 

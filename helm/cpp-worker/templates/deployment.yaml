@@ -29,6 +29,8 @@ spec:
         runAsUser: 1000
         runAsNonRoot: true
         fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       terminationGracePeriodSeconds: {{ .Values.shutdown.terminationGracePeriodSeconds | default 60 }}
       containers:
         - name: {{ .Chart.Name }}

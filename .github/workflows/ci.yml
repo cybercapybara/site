@@ -23,7 +23,7 @@ jobs:
     # compose profile — the same thing `make test` does locally.
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3.12.0
@@ -61,7 +61,7 @@ jobs:
     # Pure text lint — doesn't need Docker, runs fast, gates style issues
     # before the heavier build job finishes.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install clang-format 17
         run: |
@@ -98,7 +98,7 @@ jobs:
     # Catch credentials before they land. We learned the hard way that a
     # local helm/values.yaml with stage passwords can slip into git.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0  # gitleaks needs history to scan past commits.
       - name: Run gitleaks
@@ -112,7 +112,7 @@ jobs:
     # Api::get_endpoints() match docs/openapi.yaml. Runs in seconds, gates
     # the heavier build job from going green if the spec is stale.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Check OpenAPI drift
         run: ./scripts/check-openapi-drift.sh
       - name: Check test-bucket filter sync
@@ -125,7 +125,7 @@ jobs:
     # baseDomain expanded, no null ports). No cluster — pure template smoke
     # test. Catches the helm bug class that compile + unit tests cannot.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Install helm + yq
         run: |
           curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
@@ -143,8 +143,8 @@ jobs:
     defaults:
       run: { working-directory: frontend }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '20'
           cache: 'npm'
@@ -175,7 +175,7 @@ jobs:
     # baseline is still being tightened.
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3.12.0
@@ -208,7 +208,7 @@ jobs:
 
       - name: Upload clang-tidy log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: clang-tidy-log
           path: clang-tidy.log
@@ -222,7 +222,7 @@ jobs:
     # signal for memory/UB regressions.
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3.12.0

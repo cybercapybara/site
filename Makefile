@@ -23,7 +23,7 @@ ALL_PROFILES := --profile with-replica --profile with-sentinel --profile with-ka
                 --profile with-worker --profile with-frontend --profile with-monitoring
 ENV     := --env-file docker/.env
 
-.PHONY: up up-replica up-sentinel up-kafka up-worker up-full up-monitoring \
+.PHONY: up up-pull up-replica up-sentinel up-kafka up-worker up-full up-monitoring \
         up-everything up-dev quickstart dev down down-v dev-reset \
         test test-unit test-quick test-e2e test-local test-unit-local test-integration-local test-watch \
         build build-worker build-all build-local warm-cache configure-local compile-commands \
@@ -40,30 +40,35 @@ ENV     := --env-file docker/.env
 
 # up-* targets PULL the prebuilt public images (app/worker/frontend) that
 # GitLab CI publishes on master, then start — no local compile on your mac.
-# `--pull always` refreshes :latest each time (compose v2). Infra images
-# (postgres/redis/kafka) pull as usual. To build locally instead, use
-# `make up-build` (or append `--build`).
-up:                ## Base stack (app + PostgreSQL + Redis) — pulls public images
+# Infra images (postgres/redis/kafka) pull as usual; the app uses `--pull
+# missing` so a fork that built its own image (or renamed it) isn't clobbered by
+# the upstream `:latest` — and a fresh clone gets a clear "build it" error rather
+# than silently running someone else's binary. `make up-pull` force-refreshes the
+# upstream images; `make quickstart` / `make up-build` build your own code.
+up:                ## Base stack (app + PostgreSQL + Redis)
+	$(COMPOSE) $(ENV) up -d --pull missing
+
+up-pull:           ## Like `up` but force-pull the upstream public images (refresh :latest)
 	$(COMPOSE) $(ENV) up -d --pull always
 
 up-replica:        ## + PostgreSQL streaming read replica
-	$(COMPOSE) --profile with-replica --env-file docker/.env.replica up -d --pull always
+	$(COMPOSE) --profile with-replica --env-file docker/.env.replica up -d --pull missing
 
 up-sentinel:       ## + Redis Sentinel (3-node HA)
-	$(COMPOSE) --profile with-sentinel --env-file docker/.env.sentinel up -d --pull always
+	$(COMPOSE) --profile with-sentinel --env-file docker/.env.sentinel up -d --pull missing
 
 up-kafka:          ## + Kafka + Zookeeper
-	$(COMPOSE) --profile with-kafka --env-file docker/.env.kafka up -d --pull always
+	$(COMPOSE) --profile with-kafka --env-file docker/.env.kafka up -d --pull missing
 
 up-full:           ## Full stack (replica + sentinel + kafka)
 	$(COMPOSE) --profile with-replica --profile with-sentinel --profile with-kafka \
-		--env-file docker/.env.full up -d --pull always
+		--env-file docker/.env.full up -d --pull missing
 
 up-worker:         ## + Background job worker
-	$(COMPOSE) --profile with-worker --env-file docker/.env.worker up -d --pull always
+	$(COMPOSE) --profile with-worker --env-file docker/.env.worker up -d --pull missing
 
 up-monitoring:     ## + Prometheus + Grafana + Jaeger
-	$(COMPOSE) --env-file docker/.env.monitoring --profile with-monitoring up -d --pull always
+	$(COMPOSE) --env-file docker/.env.monitoring --profile with-monitoring up -d --pull missing
 
 up-everything:     ## Replica + Sentinel + Kafka + Worker + Frontend + monitoring — pulls public images
 	@# AUTH_MODE=jwt needs a secret; the committed env file deliberately ships
@@ -75,7 +80,7 @@ up-everything:     ## Replica + Sentinel + Kafka + Worker + Frontend + monitorin
 		echo "==> Generated dev JWT secret: docker/.jwt-dev-secret (gitignored)" ; \
 	fi
 	JWT_SECRET=$${JWT_SECRET:-$$(cat docker/.jwt-dev-secret)} \
-	$(COMPOSE) --env-file docker/.env.everything $(ALL_PROFILES) up -d --pull always
+	$(COMPOSE) --env-file docker/.env.everything $(ALL_PROFILES) up -d --pull missing
 	@echo "==> app on :8080, SPA on :3001, Mailpit UI on :8025, Grafana on :3000"
 
 up-build:          ## Like up-everything but BUILD images locally (no pull) — for local code changes
@@ -88,7 +93,8 @@ up-build:          ## Like up-everything but BUILD images locally (no pull) — 
 up-dev: up-worker  ## Dev preset: alias for up-worker (jobs/DLQ end-to-end)
 	@echo "==> app on :8080, worker on :9091, metrics on :9090"
 
-quickstart: up    ## One-shot: bring the stack up, wait for ready, hit / and /healthz
+quickstart:        ## One-shot: BUILD your code + Postgres + Redis, wait for ready, hit / and /healthz
+	$(COMPOSE) $(ENV) up -d --build
 	@echo "==> Waiting for /healthz (up to 60s)"
 	@for i in $$(seq 1 30); do \
 	    if curl -fsS -o /dev/null http://localhost:8080/healthz; then break; fi; \
@@ -316,7 +322,15 @@ coverage:          ## Build with coverage instrumentation, run tests, emit HTML 
 	@command -v gcovr >/dev/null 2>&1 || { echo "gcovr missing — pip install gcovr"; exit 1; }
 	cmake --preset coverage
 	cmake --build --preset coverage -j
+	@# Run EVERY bucket, not just unit — otherwise the report counts only the
+	@# unit-reachable code and badly understates the DB / cache / auth / jobs
+	@# paths that ONLY the integration + e2e buckets exercise. integration/e2e
+	@# need Postgres + Redis (run `make up` first); each is `|| true` so a missing
+	@# sidecar degrades the number instead of aborting the whole report.
+	@echo "==> running all test buckets (integration/e2e need Postgres+Redis — make up first)"
 	@./build/coverage/cpp_api_template_tests_unit --gtest_color=yes || true
+	@./build/coverage/cpp_api_template_tests_integration --gtest_color=yes || true
+	@./build/coverage/cpp_api_template_e2e --gtest_color=yes || true
 	@mkdir -p coverage
 	gcovr -r . --filter 'src/.*' --html-details coverage/index.html --print-summary
 	@echo "==> open coverage/index.html"
@@ -490,7 +504,7 @@ frontend-test:     ## Vitest single-shot
 	cd frontend && npm run test
 
 frontend-up:       ## Pull + start the frontend container alongside the base stack
-	$(COMPOSE) $(ENV) --profile with-frontend up -d --pull always frontend
+	$(COMPOSE) $(ENV) --profile with-frontend up -d --pull missing frontend
 	@echo "==> SPA on :3001 (http://localhost:3001)"
 
 frontend-image:    ## Build the frontend Docker image only

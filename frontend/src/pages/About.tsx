@@ -7,7 +7,7 @@ export function AboutPage() {
         <CardHeader>
           <CardTitle>About</CardTitle>
           <CardDescription>
-            React SPA against a C++ REST backend. flask-base feature parity.
+            React admin SPA on a C++ REST backend — full account and admin flows.
           </CardDescription>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground space-y-2">

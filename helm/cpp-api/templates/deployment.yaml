@@ -29,6 +29,8 @@ spec:
         runAsUser: 1000
         runAsNonRoot: true
         fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       {{- if .Values.migrations.runAsInitContainer }}
       initContainers:
         - name: migrate
@@ -221,6 +223,8 @@ spec:
             # Auth — login (mint_session) needs JWT_SECRET set regardless of
             # mode; mode=jwt also enforces auth on protected routes. Keep the
             # secret/issuer/audience in sync with the cpp-worker chart.
+            - name: APP_ENV
+              value: {{ .Values.app.env | default "production" | quote }}
             - name: AUTH_MODE
               value: {{ .Values.auth.mode | quote }}
             {{- if .Values.auth.jwtSecret }}

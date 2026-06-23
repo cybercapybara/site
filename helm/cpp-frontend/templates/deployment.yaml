@@ -30,6 +30,8 @@ spec:
         runAsUser: {{ .Values.podSecurityContext.runAsUser }}
         runAsGroup: {{ .Values.podSecurityContext.runAsGroup }}
         fsGroup: {{ .Values.podSecurityContext.fsGroup }}
+        seccompProfile:
+          type: RuntimeDefault
       {{- end }}
       containers:
         - name: {{ .Chart.Name }}

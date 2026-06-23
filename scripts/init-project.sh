@@ -68,6 +68,11 @@ else
     REGISTRY="docker.io/library"
 fi
 
+# Bare org/namespace from the registry (docker.io/myorg -> myorg, ghcr.io/me -> me)
+# — used to rebrand the GHCR builder-cache namespace so a fork's `make warm-cache`
+# doesn't reach for the template author's `resert` namespace.
+REGISTRY_ORG="${REGISTRY##*/}"
+
 # Derive snake_case from kebab-case: my-service -> my_service
 PROJECT_SNAKE="${PROJECT_NAME//-/_}"
 
@@ -149,6 +154,8 @@ declare -a PATTERNS=(
     "s|resert/cpp-rapid-rest-app|${REGISTRY}/${PROJECT_NAME}|g"
     # 2. CI image name
     "s|resert/cpp-rapid-rest-template|${REGISTRY}/${PROJECT_NAME}|g"
+    # 2b. GHCR builder-cache namespace (builder-cache.yml, Makefile GHCR default)
+    "s|ghcr.io/resert|ghcr.io/${REGISTRY_ORG}|g"
     # 3. Repo-level references
     "s|cpp-rapid-rest-template|${PROJECT_NAME}|g"
     # 4. CMake project name, binary names, Dockerfile
@@ -200,7 +207,7 @@ if [[ $DRY_RUN -eq 1 ]]; then
     if [[ -d "helm/cpp-worker" && "cpp-worker" != "${PROJECT_NAME}-worker" ]]; then
         echo "==> Would rename helm/cpp-worker -> helm/${PROJECT_NAME}-worker"
     fi
-    echo "==> Would write project.env (PROJECT_NAME=${PROJECT_NAME}, REGISTRY=${REGISTRY})"
+    echo "==> Would write project.env (PROJECT_NAME=${PROJECT_NAME}, REGISTRY=${REGISTRY}, GHCR_ORG=${REGISTRY_ORG})"
     echo ""
     echo "DRY RUN complete. Re-run without --dry-run to apply."
     exit 0
@@ -227,6 +234,7 @@ fi
 cat >project.env <<EOF
 PROJECT_NAME=${PROJECT_NAME}
 REGISTRY=${REGISTRY}
+GHCR_ORG=${REGISTRY_ORG}
 EOF
 echo "==> Updated project.env"
 

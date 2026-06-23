@@ -14,8 +14,23 @@ and start writing endpoints instead of reinventing auth, rate limiting, tracing,
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
+**Status:** stable template (v1.x) — the structure and APIs are settled and meant
+to be forked as a base for real services; breaking changes follow SemVer. Issues
+and PRs welcome (see [CONTRIBUTING.md](CONTRIBUTING.md)).
+
+## Live demo
+
+A throwaway public demo runs at **[app.demo.tarassov.me](https://app.demo.tarassov.me)** —
+register your own account, or sign in as **`admin@demo.tarassov.me`** /
+**`DemoAdmin-2026`** to explore the admin, RBAC, and audit features. Outgoing mail
+lands in a public [Mailpit inbox](https://mail.demo.tarassov.me) and requests are
+traced in [Jaeger](https://jaeger.demo.tarassov.me). It holds no real data and is
+reset periodically. Stood up with [`scripts/deploy-demo.sh`](scripts/deploy-demo.sh)
+(`helm/cpp-env/values-demo.yaml`).
+
 ## Contents
 
+- [Live demo](#live-demo)
 - [Why this template](#why-this-template)
 - [What's in the box](#whats-in-the-box)
 - [Quick start](#quick-start)
@@ -41,6 +56,10 @@ the handler so you don't spend the first month rebuilding it:
 boring-but-mandatory production middleware, deployed via Docker/K8s.
 **Poor fit:** gRPC-first systems, GUI apps, embedded targets without Docker —
 the value here is the integration glue, and that glue assumes containers.
+
+Performance is the reason to be here, and it's hardware-specific — measure it on
+yours with `make bench`; [docs/BENCHMARKS.md](docs/BENCHMARKS.md) has the
+methodology and a results template.
 
 
 ## What's in the box
@@ -167,7 +186,7 @@ the value here is the integration glue, and that glue assumes containers.
 ## Quick start
 
 ```bash
-git clone https://github.com/your-org/cpp-rapid-rest-template.git my-service
+git clone https://gitlab.com/tarassov.me/cpp-rapid-rest-template.git my-service
 cd my-service
 
 # Rename template identity (project name, image registry, helm charts, etc.)
@@ -507,4 +526,6 @@ plus a production-hardening checklist.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE). Third-party dependencies and their licenses (plus
+the flask-base attribution for the ported account/admin surface) are listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

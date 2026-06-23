@@ -1,5 +1,8 @@
 # Contributing
 
+By participating you agree to our [Code of Conduct](CODE_OF_CONDUCT.md). For
+security issues, follow [SECURITY.md](SECURITY.md) — don't open a public issue.
+
 ## One-time setup
 
 ```bash
