@@ -472,7 +472,7 @@ docs/            openapi.yaml, CONFIG.md, EXAMPLES.md, INDEX.md, adr/, Doxyfile
 | `make test-local NAME=Jobs*` | Native gtest run with a `--gtest_filter` |
 | `make test-watch` | Re-run unit tests on src/ or tests/ change (watchexec or entr) |
 | `make watch` | Rebuild + restart on `src/` change (entr or watchexec) |
-| `make coverage` | gcovr HTML report in `coverage/index.html` |
+| `make coverage` | gcovr HTML report in `coverage/index.html`; fails under `COVERAGE_MIN`% line coverage (default 40, a regression floor) |
 | `make ci-local` | Reproduce CI locally: format check + drift + spectral + tidy + tests |
 | `make helm-lint` | `helm lint` + smoke `helm template` over all four charts |
 | `make routes` / `make health` | Print endpoint table / hit health probes |
