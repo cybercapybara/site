@@ -22,16 +22,19 @@
 #include "database/Database.hpp"
 #include "domain/Role.hpp"
 #include "domain/User.hpp"
+#include "repositories/RepoErrors.hpp"
 #include "repositories/SqlErrors.hpp"
 
 namespace Repositories {
 
-struct DuplicateEmail : std::runtime_error {
-    DuplicateEmail() : std::runtime_error("email already registered") {}
+// The 409 code / 404 resource the HTTP layer reports live ON the exception now,
+// so the shared with_repo_errors() helper maps them without knowing this type.
+struct DuplicateEmail : ConflictError {
+    DuplicateEmail() : ConflictError("email_taken", "Email is already registered") {}
 };
 
-struct UserNotFound : std::runtime_error {
-    UserNotFound() : std::runtime_error("user not found") {}
+struct UserNotFound : NotFoundError {
+    UserNotFound() : NotFoundError("user") {}
 };
 
 class UserRepository {
