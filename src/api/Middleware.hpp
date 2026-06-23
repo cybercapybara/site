@@ -34,6 +34,7 @@
 #include "observability/Observability.hpp"
 #include "observability/Trace.hpp"
 #include "security/Auth.hpp"
+#include "security/Csrf.hpp"
 #include "security/Idempotency.hpp"
 #include "security/RateLimit.hpp"
 #include "utils/Config.hpp"
@@ -219,6 +220,38 @@ inline void register_rate_limit() {
         });
 }
 
+/**
+ * @brief Double-submit-cookie CSRF guard (opt-in via security.csrf.enabled).
+ * @details Enforces, for cookie-authenticated state-changing requests, that the
+ *          CSRF cookie value is echoed in the configured header. The decision
+ *          lives in Security::Csrf::passes() (unit-tested); this advice just
+ *          feeds it the request's method/cookies/header. Off by default — the
+ *          token cookie is emitted by set_session_cookies only when enabled.
+ */
+inline void register_csrf() {
+    if (!Config::is_initialized())
+        return;
+    if (!Config::get().get<bool>("security.csrf.enabled", "SECURITY_CSRF_ENABLED", false))
+        return;
+    const std::string cookie_name =
+        Config::get().get<std::string>("security.csrf.cookie_name", "SECURITY_CSRF_COOKIE", "csrf-token");
+    const std::string header_name =
+        Config::get().get<std::string>("security.csrf.header_name", "SECURITY_CSRF_HEADER", "X-CSRF-Token");
+    std::string access_cookie = "__Host-access";
+    if (Security::Auth::is_initialized())
+        access_cookie = Security::Auth::get().config().cookies.access_name;
+
+    drogon::app().registerSyncAdvice(
+        [cookie_name, header_name, access_cookie](const drogon::HttpRequestPtr& req) -> drogon::HttpResponsePtr {
+            const auto m = req->method();
+            const bool unsafe = (m == drogon::Post || m == drogon::Put || m == drogon::Patch || m == drogon::Delete);
+            if (Security::Csrf::passes(
+                    unsafe, req->getCookie(access_cookie), req->getCookie(cookie_name), req->getHeader(header_name)))
+                return {};
+            return ErrorResponse::forbidden("csrf_failed", "CSRF token missing or invalid");
+        });
+}
+
 inline void register_idempotency() {
     if (!Security::Idempotency::is_initialized())
         return;
@@ -304,6 +337,38 @@ inline void register_cors() {
                 resp->addHeader("Access-Control-Allow-Origin", origin);
                 resp->addHeader("Vary", "Origin");
             }
+        });
+}
+
+/**
+ * @brief Stamp baseline security headers on every response.
+ * @details API responses are JSON, so the CSP is locked all the way down
+ *          (default-src 'none') — nothing should ever execute or embed from an
+ *          API origin. The SPA's own HTML/CSP is set at the edge (nginx). HSTS
+ *          is opt-in (security.hsts): it's only honoured over HTTPS, but gating
+ *          it keeps it out of plain-http dev. set_if_absent never clobbers a
+ *          header a handler deliberately set.
+ */
+inline void register_security_headers() {
+    bool hsts = false;
+    int hsts_max_age = 31536000;
+    if (Config::is_initialized()) {
+        hsts = Config::get().get<bool>("security.hsts", "SECURITY_HSTS", false);
+        hsts_max_age = Config::get().get<int>("security.hsts_max_age", "SECURITY_HSTS_MAX_AGE", 31536000);
+    }
+    drogon::app().registerPostHandlingAdvice(
+        [hsts, hsts_max_age](const drogon::HttpRequestPtr&, const drogon::HttpResponsePtr& resp) {
+            auto set_if_absent = [&](const char* key, const std::string& value) {
+                if (resp->getHeader(key).empty())
+                    resp->addHeader(key, value);
+            };
+            set_if_absent("X-Content-Type-Options", "nosniff");
+            set_if_absent("X-Frame-Options", "DENY");
+            set_if_absent("Referrer-Policy", "no-referrer");
+            set_if_absent("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
+            if (hsts)
+                set_if_absent("Strict-Transport-Security",
+                              "max-age=" + std::to_string(hsts_max_age) + "; includeSubDomains");
         });
 }
 

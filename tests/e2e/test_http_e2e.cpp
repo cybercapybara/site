@@ -184,6 +184,18 @@ TEST(HttpE2E, HealthzCarriesRequestIdHeader) {
     EXPECT_FALSE(resp->getHeader("x-request-id").empty());
 }
 
+TEST(HttpE2E, SecurityHeadersStampedOnEveryResponse) {
+    REQUIRE_E2E_ENV();
+    auto req = HttpRequest::newHttpRequest();
+    req->setPath("/healthz");
+    auto resp = send(req);
+    EXPECT_EQ(resp->getHeader("x-content-type-options"), "nosniff");
+    EXPECT_EQ(resp->getHeader("x-frame-options"), "DENY");
+    EXPECT_EQ(resp->getHeader("referrer-policy"), "no-referrer");
+    // API responses are JSON — CSP is locked down (default-src 'none').
+    EXPECT_FALSE(resp->getHeader("content-security-policy").empty());
+}
+
 TEST(HttpE2E, TraceparentPropagatesToResponse) {
     REQUIRE_E2E_ENV();
     auto req = HttpRequest::newHttpRequest();

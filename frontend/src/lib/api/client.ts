@@ -201,7 +201,11 @@ function isRefreshable(path: string): boolean {
 }
 
 function tryRefresh(): Promise<boolean> {
-  refreshInFlight ??= fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' })
+  refreshInFlight ??= fetch('/api/auth/refresh', {
+    method: 'POST',
+    credentials: 'include',
+    headers: csrfHeader('POST'),
+  })
     .then((r) => r.ok)
     .catch(() => false)
     .finally(() => {
@@ -223,6 +227,31 @@ function withQuery(path: string, query?: Record<string, unknown>): string {
   return path + (path.includes('?') ? '&' : '?') + qs;
 }
 
+// ── Double-submit CSRF ──────────────────────────────────────────────────────
+// When the backend has security.csrf.enabled, it sets a NON-HttpOnly cookie
+// (default `csrf-token`) on login/refresh that we echo back in a header on
+// state-changing requests. The backend rejects a cookie-authenticated mutation
+// whose header doesn't match the cookie. When CSRF is disabled the cookie is
+// absent and csrfHeader() is a no-op, so this is safe regardless of config.
+const CSRF_COOKIE = 'csrf-token';
+const CSRF_HEADER = 'X-CSRF-Token';
+const UNSAFE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+function readCookie(name: string): string | undefined {
+  if (typeof document === 'undefined') return undefined;
+  for (const part of document.cookie.split('; ')) {
+    const eq = part.indexOf('=');
+    if (eq > 0 && part.slice(0, eq) === name) return decodeURIComponent(part.slice(eq + 1));
+  }
+  return undefined;
+}
+
+function csrfHeader(method: string): Record<string, string> {
+  if (!UNSAFE_METHODS.has(method.toUpperCase())) return {};
+  const token = readCookie(CSRF_COOKIE);
+  return token ? { [CSRF_HEADER]: token } : {};
+}
+
 async function rawRequest(method: string, path: string, opts: RequestOptions): Promise<Response> {
   const init: RequestInit = {
     method,
@@ -230,6 +259,7 @@ async function rawRequest(method: string, path: string, opts: RequestOptions): P
     headers: {
       Accept: 'application/json',
       ...(opts.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      ...csrfHeader(method),
       ...opts.headers,
     },
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,

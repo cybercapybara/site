@@ -95,6 +95,15 @@
     "enabled": "${DOCS_ENABLED:-false}",
     "openapi_path": "docs/openapi.yaml"
   },
+  "security": {
+    "hsts": "${SECURITY_HSTS:-false}",
+    "hsts_max_age": 31536000,
+    "csrf": {
+      "enabled": "${SECURITY_CSRF_ENABLED:-false}",
+      "cookie_name": "csrf-token",
+      "header_name": "X-CSRF-Token"
+    }
+  },
   "auth": {
     "mode": "${AUTH_MODE:-none}",
     "bearer_token": "${AUTH_BEARER_TOKEN:-}",

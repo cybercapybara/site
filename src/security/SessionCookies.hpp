@@ -12,6 +12,8 @@
 #include <drogon/HttpRequest.h>
 #include <drogon/HttpResponse.h>
 
+#include "utils/Crypto.hpp"
+
 namespace Security::Auth {
 
 /**
@@ -36,6 +38,11 @@ struct CookieConfig {
     // token has a JTI that we write here on issue and check on /refresh.
     // Logout deletes the entry, instantly revoking the chain.
     std::string refresh_revocation_prefix = "auth:refresh:";
+    // Double-submit CSRF (off by default). When on, set_session_cookies also
+    // emits a NON-HttpOnly token cookie the SPA echoes in a header; the
+    // register_csrf middleware enforces the match on cookie-auth mutations.
+    bool csrf_enabled = false;
+    std::string csrf_cookie_name = "csrf-token";
 };
 
 /**
@@ -81,9 +88,11 @@ inline void set_session_cookies(const drogon::HttpResponsePtr& resp,
                                 const CookieConfig& cookies,
                                 const std::string& access_token,
                                 const std::string& refresh_token) {
-    auto make_cookie = [&](const std::string& name, const std::string& value, int ttl) {
+    // http_only=false is used ONLY for the CSRF token cookie — the SPA must
+    // read it from JS to echo it in a header. The session cookies stay HttpOnly.
+    auto make_cookie = [&](const std::string& name, const std::string& value, int ttl, bool http_only = true) {
         drogon::Cookie c(name, value);
-        c.setHttpOnly(true);
+        c.setHttpOnly(http_only);
         c.setPath("/");
         c.setMaxAge(ttl);
         if (cookies.secure)
@@ -104,11 +113,19 @@ inline void set_session_cookies(const drogon::HttpResponsePtr& resp,
         // tells the browser to discard.
         resp->addCookie(make_cookie(cookies.access_name, "", 0));
         resp->addCookie(make_cookie(cookies.refresh_name, "", 0));
+        if (cookies.csrf_enabled)
+            resp->addCookie(make_cookie(cookies.csrf_cookie_name, "", 0, /*http_only=*/false));
         return;
     }
     resp->addCookie(make_cookie(cookies.access_name, access_token, cookies.access_ttl_sec));
     if (!refresh_token.empty())
         resp->addCookie(make_cookie(cookies.refresh_name, refresh_token, cookies.refresh_ttl_sec));
+    if (cookies.csrf_enabled) {
+        // Fresh random token each mint; double-submit only needs cookie==header,
+        // so any unpredictable value works. Lifetime tracks the access cookie.
+        resp->addCookie(make_cookie(
+            cookies.csrf_cookie_name, Utils::Crypto::random_hex(32), cookies.access_ttl_sec, /*http_only=*/false));
+    }
 }
 
 }  // namespace Security::Auth

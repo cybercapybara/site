@@ -70,6 +70,15 @@
   "docs": {
     "enabled": false
   },
+  "security": {
+    "hsts": true,
+    "hsts_max_age": 31536000,
+    "csrf": {
+      "enabled": "${SECURITY_CSRF_ENABLED:-false}",
+      "cookie_name": "csrf-token",
+      "header_name": "X-CSRF-Token"
+    }
+  },
   "auth": {
     "mode": "jwt",
     "cookies": {
