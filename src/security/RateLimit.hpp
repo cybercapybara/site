@@ -56,12 +56,19 @@ struct Config {
     bool enabled = false;
     int requests = 60;    // max per window
     int window_sec = 60;  // window size
+    // Stricter tier for the public auth/account surface (login, register,
+    // refresh, password-reset, token links). Those paths are auth-public, so
+    // the general limiter's public_paths skip leaves them unthrottled — this
+    // tier re-arms them with a tight per-IP cap.
+    int protected_requests = 10;
+    int protected_window_sec = 60;
     Scope scope = Scope::IpOrUser;
     bool trust_proxy = false;                   // read X-Forwarded-For
     int trusted_proxy_count = 1;                // # of trusted hops appended to XFF (index from the right)
     bool fail_open = true;                      // allow on Redis error
     std::unordered_set<std::string> whitelist;  // IPs or user subjects
     std::unordered_set<std::string> public_paths;
+    std::unordered_set<std::string> protected_paths;  // auth surface, limited despite being public
 };
 
 struct Decision {
@@ -114,26 +121,41 @@ public:
 
     const Config& config() const { return cfg_; }
 
+    // General tier: skips api.public_paths, buckets by ip_or_user.
     Decision check(const std::string& identity) const {
+        return check_window(identity, cfg_.requests, cfg_.window_sec, "rl:sw:");
+    }
+
+    // Stricter tier for the public auth/account surface (login, register,
+    // refresh, password-reset, token links). Separate Redis key namespace
+    // ("rl:auth:") so it counts independently from the general limiter — a
+    // burst of logins doesn't consume a user's normal API budget and vice
+    // versa.
+    Decision check_protected(const std::string& identity) const {
+        return check_window(identity, cfg_.protected_requests, cfg_.protected_window_sec, "rl:auth:");
+    }
+
+private:
+    Decision check_window(const std::string& identity, int requests, int window_sec, const char* key_prefix) const {
         if (!cfg_.enabled)
-            return {true, cfg_.requests, 0};
+            return {true, requests, 0};
         // identity is prefixed ("ip:1.2.3.4" / "user:abc") but the configured
         // whitelist holds raw IPs / subjects — match against the bare value
         // (and the prefixed form, for forgiving config).
         if (cfg_.whitelist.count(identity) > 0) {
-            return {true, cfg_.requests, 0};
+            return {true, requests, 0};
         }
         if (auto colon = identity.find(':');
             colon != std::string::npos && cfg_.whitelist.count(identity.substr(colon + 1)) > 0) {
-            return {true, cfg_.requests, 0};
+            return {true, requests, 0};
         }
         if (!Cache::is_initialized()) {
-            return fallback_("cache not initialized");
+            return fallback_("cache not initialized", requests);
         }
         try {
             const int64_t now_ms = Utils::Time::now_epoch_millis();
-            const int64_t window_ms = static_cast<int64_t>(cfg_.window_sec) * 1000;
-            const std::string key = "rl:sw:" + identity;
+            const int64_t window_ms = static_cast<int64_t>(window_sec) * 1000;
+            const std::string key = std::string(key_prefix) + identity;
             // member uniqueness = ms ts + atomic counter; two requests in
             // the same millisecond from the same identity get distinct members.
             static std::atomic<uint64_t> counter{0};
@@ -144,28 +166,27 @@ public:
             // Redis 7+ auto-caches scripts; re-EVAL is cheap (script SHA cached client-side).
             std::vector<std::string> keys = {key};
             std::vector<std::string> args = {
-                std::to_string(now_ms), std::to_string(window_ms), std::to_string(cfg_.requests), member};
+                std::to_string(now_ms), std::to_string(window_ms), std::to_string(requests), member};
             auto result = redis.eval<std::vector<long long>>(
                 kSlidingWindowLua, keys.begin(), keys.end(), args.begin(), args.end());
             if (result.size() < 3)
-                return fallback_("sliding window eval: short reply");
+                return fallback_("sliding window eval: short reply", requests);
 
             const bool allowed = result[0] == 1;
             const long long count_after = result[1];
             const long long retry_ms = result[2];
-            const int remaining = std::max(0, cfg_.requests - static_cast<int>(count_after));
+            const int remaining = std::max(0, requests - static_cast<int>(count_after));
             const int retry_after_sec = allowed ? 0 : static_cast<int>(std::max<long long>(1, (retry_ms + 999) / 1000));
             return {allowed, remaining, retry_after_sec};
         } catch (const std::exception& e) {
-            return fallback_(e.what());
+            return fallback_(e.what(), requests);
         }
     }
 
-private:
-    Decision fallback_(const std::string& reason) const {
+    Decision fallback_(const std::string& reason, int requests) const {
         if (cfg_.fail_open) {
             spdlog::warn("rate limiter fail-open: {}", reason);
-            return {true, cfg_.requests, 0};
+            return {true, requests, 0};
         }
         spdlog::warn("rate limiter fail-closed: {}", reason);
         return {false, 0, 1};
@@ -188,6 +209,8 @@ inline Config load_config_from_global() {
     cfg.enabled = c.get<bool>("rate_limit.enabled", "RATE_LIMIT_ENABLED", false);
     cfg.requests = c.get<int>("rate_limit.requests", "RATE_LIMIT_REQUESTS", 60);
     cfg.window_sec = c.get<int>("rate_limit.window_sec", "RATE_LIMIT_WINDOW_SEC", 60);
+    cfg.protected_requests = c.get<int>("rate_limit.protected_requests", "RATE_LIMIT_PROTECTED_REQUESTS", 10);
+    cfg.protected_window_sec = c.get<int>("rate_limit.protected_window_sec", "RATE_LIMIT_PROTECTED_WINDOW_SEC", 60);
     cfg.trust_proxy = c.get<bool>("rate_limit.trust_proxy", "RATE_LIMIT_TRUST_PROXY", false);
     cfg.trusted_proxy_count = c.get<int>("rate_limit.trusted_proxy_count", "RATE_LIMIT_TRUSTED_PROXY_COUNT", 1);
     if (cfg.trusted_proxy_count < 1)
@@ -199,10 +222,16 @@ inline Config load_config_from_global() {
     // Single source of truth — see comment in Auth.hpp::load_config_from_global().
     cfg.public_paths = Utils::Strings::split_csv_set(
         c.get<std::string>("api.public_paths", "API_PUBLIC_PATHS", Utils::Strings::kDefaultPublicPathsCsv));
+    cfg.protected_paths = Utils::Strings::split_csv_set(c.get<std::string>(
+        "rate_limit.protected_paths", "RATE_LIMIT_PROTECTED_PATHS", Utils::Strings::kDefaultProtectedPathsCsv));
     if (cfg.requests <= 0)
         cfg.requests = 1;
     if (cfg.window_sec <= 0)
         cfg.window_sec = 1;
+    if (cfg.protected_requests <= 0)
+        cfg.protected_requests = 1;
+    if (cfg.protected_window_sec <= 0)
+        cfg.protected_window_sec = 1;
     return cfg;
 }
 
@@ -287,6 +316,14 @@ inline std::string identity_for(const drogon::HttpRequestPtr& req, const Config&
         return "ip:" + ip;
     }
     return "user:" + user;
+}
+
+// Always-by-IP identity for the protected tier. Login/register carry no
+// authenticated principal, and we don't want a (possibly attacker-supplied,
+// expired) cookie's subject to shift the bucket — the brute-force unit is the
+// source IP regardless of the configured scope.
+inline std::string ip_identity(const drogon::HttpRequestPtr& req, const Config& cfg) {
+    return "ip:" + client_ip(req, cfg.trust_proxy, cfg.trusted_proxy_count);
 }
 
 }  // namespace Security::RateLimit

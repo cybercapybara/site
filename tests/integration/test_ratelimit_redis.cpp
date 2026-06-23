@@ -29,6 +29,7 @@ protected:
             auto& r = Cache::get().get_client();
             std::vector<std::string> keys;
             r.keys("rl:sw:*", std::back_inserter(keys));
+            r.keys("rl:auth:*", std::back_inserter(keys));
             for (const auto& k : keys)
                 r.del(k);
         } catch (...) {}
@@ -64,6 +65,23 @@ TEST_F(RateLimitRedisTest, SeparateIdentitiesHaveSeparateWindows) {
     EXPECT_FALSE(lim.check("ip:1.1.1.1").allowed);
     // A different identity is unaffected.
     EXPECT_TRUE(lim.check("ip:2.2.2.2").allowed);
+}
+
+TEST_F(RateLimitRedisTest, ProtectedTierIsSeparateAndStricter) {
+    RL::Config c = cfg(/*requests=*/5);
+    c.protected_requests = 1;
+    c.protected_window_sec = 60;
+    RL::Limiter lim(std::move(c));
+    const std::string id = "ip:9.9.9.9";
+
+    // Protected tier: 1 allowed, then denied (the strict auth cap).
+    EXPECT_TRUE(lim.check_protected(id).allowed);
+    EXPECT_FALSE(lim.check_protected(id).allowed) << "2nd hit on the auth tier must be denied";
+
+    // The general tier on the SAME identity is untouched — separate key
+    // namespace ("rl:sw:" vs "rl:auth:"), so a throttled login doesn't also
+    // lock the caller out of the normal API.
+    EXPECT_TRUE(lim.check(id).allowed) << "general tier must not share the auth-tier counter";
 }
 
 }  // namespace

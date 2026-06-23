@@ -129,6 +129,8 @@
     "enabled": false,
     "requests": 60,
     "window_sec": 60,
+    "protected_requests": 10,
+    "protected_window_sec": 60,
     "scope": "ip_or_user",
     "trust_proxy": false,
     "fail_open": true,

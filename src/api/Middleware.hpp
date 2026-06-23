@@ -172,20 +172,34 @@ inline void register_rate_limit() {
             return {};
         auto& limiter = Security::RateLimit::get();
         const auto& cfg = limiter.config();
-        if (Utils::Strings::path_is_public(cfg.public_paths, req->path()))
-            return {};
 
-        auto d = limiter.check(Security::RateLimit::identity_for(req, cfg));
+        // The auth/account surface (login, register, refresh, password-reset,
+        // token links) is auth-public, so the general public_paths skip below
+        // would leave it unthrottled — the brute-force / mail-bomb hole. Route
+        // those paths to the stricter per-IP tier FIRST, before the skip.
+        const bool is_protected = Utils::Strings::path_is_public(cfg.protected_paths, req->path());
+        if (!is_protected && Utils::Strings::path_is_public(cfg.public_paths, req->path()))
+            return {};  // genuinely public infra/static (health, metrics, docs) — never limited
+
+        Security::RateLimit::Decision d;
+        int effective_limit;
+        if (is_protected) {
+            d = limiter.check_protected(Security::RateLimit::ip_identity(req, cfg));
+            effective_limit = cfg.protected_requests;
+        } else {
+            d = limiter.check(Security::RateLimit::identity_for(req, cfg));
+            effective_limit = cfg.requests;
+        }
         // Stash limit metadata so the post-advice can emit X-RateLimit-* on
         // successful responses too, not only on 429.
-        req->attributes()->insert("_rl_limit", cfg.requests);
+        req->attributes()->insert("_rl_limit", effective_limit);
         req->attributes()->insert("_rl_remaining", d.remaining);
         if (d.allowed)
             return {};
 
         auto resp = ErrorResponse::too_many_requests(d.retry_after_sec);
         resp->addHeader("Retry-After", std::to_string(d.retry_after_sec));
-        resp->addHeader("X-RateLimit-Limit", std::to_string(cfg.requests));
+        resp->addHeader("X-RateLimit-Limit", std::to_string(effective_limit));
         resp->addHeader("X-RateLimit-Remaining", "0");
         return resp;
     });

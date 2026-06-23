@@ -102,6 +102,8 @@
     "enabled": true,
     "requests": "${RATE_LIMIT_REQUESTS:-120}",
     "window_sec": 60,
+    "protected_requests": "${RATE_LIMIT_PROTECTED_REQUESTS:-10}",
+    "protected_window_sec": 60,
     "scope": "ip_or_user",
     "trust_proxy": true,
     "fail_open": false,
