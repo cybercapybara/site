@@ -3,19 +3,24 @@
 # One-time bootstrap: rename the template to your project identity.
 #
 # Usage:
-#   ./scripts/init-project.sh <project-name> [registry]
+#   ./scripts/init-project.sh <project-name> [registry] [domain]
 #
 # Example:
-#   ./scripts/init-project.sh my-service docker.io/myorg
+#   ./scripts/init-project.sh my-service docker.io/myorg example.org
 #
 # Arguments:
 #   project-name  Kebab-case project name (e.g. my-service)
 #   registry      Container registry (default: docker.io/library)
+#   domain        Your host/domain — replaces the author's `tarassov.me` in
+#                 badges, demo URLs and the SECURITY.md contact. Omit and it
+#                 falls back to the placeholder `example.com`.
 #
 # What it does:
 #   1. Replaces all hardcoded template names across the codebase
-#   2. Renames Helm chart directories
-#   3. Updates project.env
+#   2. De-brands the author's host/domain (so you don't ship security@theirs)
+#   3. Renames Helm chart directories
+#   4. Updates project.env
+#   5. Verifies no template/author token survived (fails loudly if one did)
 #
 set -euo pipefail
 
@@ -28,7 +33,7 @@ for arg in "$@"; do
     --force | -f) FORCE=1 ;;
     --help | -h)
         cat <<USAGE
-Usage: $0 [--dry-run] [--force] <project-name> [registry]
+Usage: $0 [--dry-run] [--force] <project-name> [registry] [domain]
 
   --dry-run, -n   Print every file that would be touched and the patterns that
                   would run, without modifying anything on disk.
@@ -36,8 +41,11 @@ Usage: $0 [--dry-run] [--force] <project-name> [registry]
                   initialised under a different name. Without this flag the
                   script asks for confirmation interactively.
 
+  domain          Your host/domain — replaces the author's tarassov.me in
+                  badges / demo URLs / SECURITY.md (default: example.com).
+
 Example:
-  $0 my-service docker.io/myorg
+  $0 my-service docker.io/myorg example.org
   $0 --dry-run my-service docker.io/myorg
 USAGE
         exit 0
@@ -47,8 +55,8 @@ USAGE
 done
 
 if [[ ${#ARGS[@]} -lt 1 ]]; then
-    echo "Usage: $0 [--dry-run] <project-name> [registry]"
-    echo "Example: $0 my-service docker.io/myorg"
+    echo "Usage: $0 [--dry-run] <project-name> [registry] [domain]"
+    echo "Example: $0 my-service docker.io/myorg example.org"
     exit 1
 fi
 
@@ -73,6 +81,19 @@ fi
 # doesn't reach for the template author's `resert` namespace.
 REGISTRY_ORG="${REGISTRY##*/}"
 
+# The template author's host/domain appears as a GitLab namespace (badge +
+# runbook links), the live-demo URLs, and the security contact in SECURITY.md.
+# Left alone, a fork SHIPS THE AUTHOR'S security@ address and infra host. Take
+# the fork's domain as the 3rd arg; otherwise neutralize to a placeholder that
+# obviously needs replacing (better an obviously-fake address than the author's
+# real one). The verification step at the end flags any survivor.
+AUTHOR_HOST="tarassov.me"
+if [[ ${#ARGS[@]} -ge 3 ]]; then
+    NEW_HOST="${ARGS[2]}"
+else
+    NEW_HOST="example.com"
+fi
+
 # Derive snake_case from kebab-case: my-service -> my_service
 PROJECT_SNAKE="${PROJECT_NAME//-/_}"
 
@@ -83,6 +104,7 @@ echo "==> Bootstrapping project"
 echo "    PROJECT_NAME  = ${PROJECT_NAME}"
 echo "    PROJECT_SNAKE = ${PROJECT_SNAKE}"
 echo "    REGISTRY      = ${REGISTRY}"
+echo "    DOMAIN        = ${NEW_HOST}$([[ "${NEW_HOST}" == "example.com" ]] && printf '  (placeholder — pass a 3rd arg to set yours)')"
 echo ""
 
 # ── Collect target files ────────────────────────────────────────
@@ -129,12 +151,14 @@ done < <(
         -o -name '*.tpl' -o -name 'CMakeLists.txt' \
         -o -name 'Dockerfile' -o -name 'Makefile' \
         -o -name '*.sh' -o -name '*.hpp' -o -name '*.cpp' \
-        -o -name '*.md' -o -name '*.conf' -o -name '*.env' \
+        -o -name '*.md' -o -name '*.conf' -o -name '*.env' -o -name '.env.*' \
+        -o -name '*.txt' -o -name '*.lock' -o -name '*.sample' \
         -o -name '.gitignore' -o -name '.gitlab-ci.yml' \
         -o -name 'Chart.yaml' \) \
         -not -path './.git/*' \
         -not -path './build/*' \
-        -not -path './vcpkg*' \
+        -not -path './vcpkg_installed/*' \
+        -not -path './vcpkg/*' \
         -not -path './frontend/node_modules/*' \
         -not -path './frontend/dist/*' \
         -not -path './_reference/*' \
@@ -178,6 +202,10 @@ declare -a PATTERNS=(
     "s|cpp_api|${PROJECT_SNAKE}|g"
     # 13. Kafka client ID
     "s|cpp_producer|${PROJECT_SNAKE}_producer|g"
+    # 14. De-brand the author's host/domain (gitlab namespace in badge + runbook
+    #     links, *.demo.<host> URLs, security@<host>). Runs last so it can't
+    #     interfere with the project-name patterns above.
+    "s|${AUTHOR_HOST//./\\.}|${NEW_HOST}|g"
 )
 
 # GNU sed accepts `-i`, BSD/macOS sed requires `-i ''` (an explicit backup
@@ -196,7 +224,7 @@ if [[ $DRY_RUN -eq 1 ]]; then
     echo ""
     echo "==> Files that would be touched (matches at least one pattern):"
     for f in "${FILES[@]}"; do
-        if grep -qE 'cpp-rapid-rest-template|cpp_api_template|cpp-api|cpp_api|cpp-worker|cpp_worker|cpp_producer|cpp_api_bench|cpp_api_service|cpp_worker_service|cpp-api-team|resert/cpp-rapid-rest-template|resert/cpp-rapid-rest-app' "$f" 2>/dev/null; then
+        if grep -qE 'cpp-rapid-rest-template|cpp_api_template|cpp-api|cpp_api|cpp-worker|cpp_worker|cpp_producer|cpp_api_bench|cpp_api_service|cpp_worker_service|cpp-api-team|resert/cpp-rapid-rest-template|resert/cpp-rapid-rest-app|tarassov\.me' "$f" 2>/dev/null; then
             echo "    $f"
         fi
     done
@@ -239,6 +267,35 @@ EOF
 echo "==> Updated project.env"
 
 echo ""
-echo "Done! Review changes with:"
-echo "  git diff"
-echo "  grep -r 'cpp_api\|cpp-api' . --include='*.hpp' --include='*.cpp' --include='*.yml' --include='*.yaml' --include='*.json' --include='Makefile' --include='Dockerfile' --include='CMakeLists.txt' | grep -v '.git/'"
+
+# ── Verify the rename took (instead of telling YOU to grep) ──────────────────
+# An INDEPENDENT, broad scan — deliberately NOT the same file set the
+# replacement used, so it also catches files that set might miss. Only the
+# UNAMBIGUOUS author/template tokens are flagged: bare "cpp-api"/"cpp_api" are
+# excluded so a fork named e.g. "cpp-api-gateway" doesn't trip it. Vendor /
+# build / generated dirs and this script itself (which necessarily contains the
+# tokens) are skipped. -I skips binaries (portable across GNU/BSD grep).
+echo "==> Verifying rename completeness"
+LEFTOVER_RE='cpp-rapid-rest-template|cpp_api_template|cpp_api_bench|cpp_api_service|cpp_worker_service|cpp_producer|cpp-api-team|resert/cpp-rapid-rest|ghcr\.io/resert|tarassov\.me'
+leftovers="$(grep -rInE "$LEFTOVER_RE" . \
+    --exclude="$(basename "$0")" \
+    --exclude=.git \
+    --exclude-dir=.git --exclude-dir=build \
+    --exclude-dir=vcpkg_installed --exclude-dir=vcpkg \
+    --exclude-dir=node_modules --exclude-dir=dist \
+    --exclude-dir=html --exclude-dir=_reference 2>/dev/null || true)"
+
+if [[ -n "$leftovers" ]]; then
+    echo "" >&2
+    echo "==> INCOMPLETE: template/author tokens still present:" >&2
+    printf '%s\n' "$leftovers" | sed 's/^/  /' >&2
+    echo "" >&2
+    echo "A surviving security@/demo host means your fork would ship the template" >&2
+    echo "author's contact. Fix the files above (or pass a domain as the 3rd arg" >&2
+    echo "and re-run), then commit." >&2
+    exit 1
+fi
+
+echo "==> Verified: no template/author tokens remain."
+echo ""
+echo "Done. Review the full diff with: git diff"
