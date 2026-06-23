@@ -527,29 +527,30 @@ manifest:multiarch:
       $IMAGE_NAME-frontend:$CI_COMMIT_SHORT_SHA-amd64
       $IMAGE_NAME-frontend:$CI_COMMIT_SHORT_SHA-arm64
 
-# Tag-driven release: builds runtime + worker images (amd64+arm64) tagged with
-# the git tag and pushes them. MANUAL so a tag push never fails the pipeline
-# when docker credentials are absent; helm appVersion should be set from the
-# same tag (helm package --app-version $CI_COMMIT_TAG). This one job stays
-# multi-arch via QEMU (rare, manual) — hence the binfmt install in its script.
+# Tag-driven release: PROMOTE the per-arch images that build:{arm64,amd64} and
+# build:frontend:* already pushed natively for this commit (a tag is always cut
+# from a built master commit, so the :<sha>-{amd64,arm64} images exist) into
+# :$CI_COMMIT_TAG manifests — the same digest-only imagetools approach as
+# manifest:multiarch. No QEMU rebuild: emulating amd64 segfaulted cmake (exit
+# 139). MANUAL so a tag push never fails the pipeline when docker creds are absent.
 release:images:
   extends: .buildx
-  stage: build
+  stage: publish
   variables:
     DOCKER_TLS_CERTDIR: ""
-    PLATFORMS: linux/amd64,linux/arm64
   rules:
     - if: $CI_COMMIT_TAG
       when: manual
   script:
-    - docker run --privileged --rm tonistiigi/binfmt:qemu-v9.2.2 --install all
     - >
-      docker buildx build --platform "$PLATFORMS"
-      --target runtime -f docker/Dockerfile
-      --cache-from type=registry,ref=$IMAGE_NAME:buildcache
-      -t $IMAGE_NAME:$CI_COMMIT_TAG --push .
+      docker buildx imagetools create -t $IMAGE_NAME:$CI_COMMIT_TAG
+      $IMAGE_NAME:$CI_COMMIT_SHORT_SHA-amd64
+      $IMAGE_NAME:$CI_COMMIT_SHORT_SHA-arm64
     - >
-      docker buildx build --platform "$PLATFORMS"
-      --target worker-runtime -f docker/Dockerfile
-      --cache-from type=registry,ref=$IMAGE_NAME:buildcache
-      -t $IMAGE_NAME-worker:$CI_COMMIT_TAG --push .
+      docker buildx imagetools create -t $IMAGE_NAME-worker:$CI_COMMIT_TAG
+      $IMAGE_NAME-worker:$CI_COMMIT_SHORT_SHA-amd64
+      $IMAGE_NAME-worker:$CI_COMMIT_SHORT_SHA-arm64
+    - >
+      docker buildx imagetools create -t $IMAGE_NAME-frontend:$CI_COMMIT_TAG
+      $IMAGE_NAME-frontend:$CI_COMMIT_SHORT_SHA-amd64
+      $IMAGE_NAME-frontend:$CI_COMMIT_SHORT_SHA-arm64
