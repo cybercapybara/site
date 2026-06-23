@@ -101,9 +101,12 @@ Per handler:
 - Integration suite `tests/integration/test_<entity>.cpp` extending
   `TestHelpers::CoreBackedTest` (`config_overrides`, `requires_postgres`,
   `post_init`); use `TestHelpers::make_request/authed/truncate_users`.
-- A new `*Test` suite that talks to Postgres/Redis MUST be added to the
-  integration bucket filter; `./scripts/check-test-buckets.sh` (run in CI)
-  fails if you forget, so the suite can't silently slip into the unit bucket.
+- Buckets are classified by DIRECTORY, not a filter list: a file in
+  `tests/integration/` (or `tests/api/`) is compiled into the integration
+  binary by CMake's `CONFIGURE_DEPENDS` glob with no registration step.
+  `./scripts/check-test-buckets.sh` (run in CI) just guards placement — it
+  fails on a suite-name clash across buckets, so a DB-dependent suite can't
+  silently shadow a unit suite.
 
 ## What NOT to reach for
 
