@@ -6,6 +6,36 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-06-23
+
+Pre-release hardening + a public demo. No breaking API changes.
+
+### Added
+- Public demo environment at `*.demo.tarassov.me` — `helm/cpp-env/values-demo.yaml`
+  + `scripts/deploy-demo.sh` (external-dns + cert-manager, Mailpit/Jaeger UIs),
+  with a periodic reset CronJob that wipes and reseeds the data.
+- `THIRD_PARTY_NOTICES.md` (dependency licenses + flask-base attribution),
+  `docs/TESTING.md` (what the suite covers and doesn't), `docs/BENCHMARKS.md`
+  (how to measure latency/footprint), `CODE_OF_CONDUCT.md`, and GitHub issue
+  templates.
+- Working dark-mode toggle and a real favicon/brand in the SPA.
+
+### Changed / Fixed
+- **Security:** constant-time bearer-token compare; the production auth-guard is
+  now actually armed (`APP_ENV` wired through config + Helm); the cpp-api chart
+  defaults to `auth.mode=jwt` so a bare install can't ship a public API.
+- **Fork experience:** `make quickstart` / `up` build the fork's own code instead
+  of pulling the upstream image; neutral registry default; CODEOWNERS and
+  Prometheus runbook links no longer hardcode the author's identity;
+  `init-project.sh` rebrands the GHCR namespace.
+- **Ops:** the backup CronJob verifies the dump (`gunzip -t` + size guard) instead
+  of silently shipping a truncated one, with failure/staleness alerts;
+  `seccompProfile` on all pods; single-replica PodDisruptionBudgets no longer
+  wedge node drains; `make coverage` runs every test bucket.
+- **CI:** Trivy fails on HIGH as well as CRITICAL; all GitHub Actions pinned to SHAs.
+- **Docs:** corrected the README inventory, a non-existent module in an ADR, a
+  migration-skeleton trap, dead clone/CI links, and a CHANGELOG contradiction.
+
 ## [1.0.0] — 2026-06-10
 
 First tagged release. Highlights of the pre-release hardening pass:
@@ -176,4 +206,5 @@ First tagged release. Highlights of the pre-release hardening pass:
 - OpenSSL linked explicitly for HMAC-SHA256 (JWT signature) and SHA-256
   (Idempotency-Key body hash); constant-time compare via `CRYPTO_memcmp`.
 
-[Unreleased]: https://gitlab.com/tarassov.me/cpp-rapid-rest-template/-/compare/v1.0.0...master
+[Unreleased]: https://gitlab.com/tarassov.me/cpp-rapid-rest-template/-/compare/v1.1.0...master
+[1.1.0]: https://gitlab.com/tarassov.me/cpp-rapid-rest-template/-/compare/v1.0.0...v1.1.0
