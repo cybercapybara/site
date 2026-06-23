@@ -27,7 +27,7 @@ namespace {
 class JobsIntegrationTest : public TestHelpers::CoreBackedTest {
 protected:
     // Queue names used by the tests below; TearDown drains exactly these.
-    static constexpr const char* kQueues[] = {"default", "retryq", "cancelq", "pagedq", "healq"};
+    static constexpr const char* kQueues[] = {"default", "retryq", "cancelq", "pagedq", "healq", "depthq"};
 
     std::vector<std::string> job_ids_to_cleanup;
 
@@ -255,6 +255,27 @@ TEST_F(JobsIntegrationTest, ListPagedHealsExpiredIndexEntries) {
     // The stale id was healed out of the index: total is exact now.
     auto again = Jobs::get().list_paged("healq", 10, 0);
     EXPECT_EQ(again.total, 1);
+}
+
+TEST_F(JobsIntegrationTest, QueueDepthByTypeCountsWaiting) {
+    // Measure our own delta rather than assume a clean slate.
+    const auto before = Jobs::get().queue_depth_by_type();
+    const long base = before.count("depthq") ? before.at("depthq") : 0;
+
+    for (int i = 0; i < 3; ++i) {
+        auto j = Jobs::get().submit("depthq", {{"n", i}});
+        track(j.id);
+    }
+
+    auto depth = Jobs::get().queue_depth_by_type();
+    ASSERT_TRUE(depth.count("depthq"));
+    EXPECT_EQ(depth.at("depthq"), base + 3);
+
+    // Picking a job off the waiting queue drops the depth by one.
+    auto picked = Jobs::get().pick({"depthq"}, 2, "w1");
+    ASSERT_TRUE(picked);
+    auto after = Jobs::get().queue_depth_by_type();
+    EXPECT_EQ(after.count("depthq") ? after.at("depthq") : 0, base + 2);
 }
 
 TEST_F(JobsIntegrationTest, SetTraceIdPersistsOnBlob) {
