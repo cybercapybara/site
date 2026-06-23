@@ -34,6 +34,7 @@
 #include "observability/Observability.hpp"
 #include "observability/Trace.hpp"
 #include "security/Auth.hpp"
+#include "security/Csrf.hpp"
 #include "security/Idempotency.hpp"
 #include "security/RateLimit.hpp"
 #include "utils/Config.hpp"
@@ -202,6 +203,38 @@ inline void register_rate_limit() {
             int remaining = req->attributes()->get<int>("_rl_remaining");
             resp->addHeader("X-RateLimit-Limit", std::to_string(limit));
             resp->addHeader("X-RateLimit-Remaining", std::to_string(remaining));
+        });
+}
+
+/**
+ * @brief Double-submit-cookie CSRF guard (opt-in via security.csrf.enabled).
+ * @details Enforces, for cookie-authenticated state-changing requests, that the
+ *          CSRF cookie value is echoed in the configured header. The decision
+ *          lives in Security::Csrf::passes() (unit-tested); this advice just
+ *          feeds it the request's method/cookies/header. Off by default — the
+ *          token cookie is emitted by set_session_cookies only when enabled.
+ */
+inline void register_csrf() {
+    if (!Config::is_initialized())
+        return;
+    if (!Config::get().get<bool>("security.csrf.enabled", "SECURITY_CSRF_ENABLED", false))
+        return;
+    const std::string cookie_name =
+        Config::get().get<std::string>("security.csrf.cookie_name", "SECURITY_CSRF_COOKIE", "csrf-token");
+    const std::string header_name =
+        Config::get().get<std::string>("security.csrf.header_name", "SECURITY_CSRF_HEADER", "X-CSRF-Token");
+    std::string access_cookie = "__Host-access";
+    if (Security::Auth::is_initialized())
+        access_cookie = Security::Auth::get().config().cookies.access_name;
+
+    drogon::app().registerSyncAdvice(
+        [cookie_name, header_name, access_cookie](const drogon::HttpRequestPtr& req) -> drogon::HttpResponsePtr {
+            const auto m = req->method();
+            const bool unsafe = (m == drogon::Post || m == drogon::Put || m == drogon::Patch || m == drogon::Delete);
+            if (Security::Csrf::passes(
+                    unsafe, req->getCookie(access_cookie), req->getCookie(cookie_name), req->getHeader(header_name)))
+                return {};
+            return ErrorResponse::forbidden("csrf_failed", "CSRF token missing or invalid");
         });
 }
 

@@ -261,6 +261,11 @@ inline AuthConfig load_config_from_global() {
     cfg.cookies.samesite = c.get<std::string>("auth.cookies.samesite", "AUTH_COOKIE_SAMESITE", "Lax");
     cfg.cookies.refresh_revocation_prefix =
         c.get<std::string>("auth.cookies.refresh_revocation_prefix", "AUTH_COOKIE_REVOCATION_PREFIX", "auth:refresh:");
+    // CSRF lives under security.csrf.* but rides on the cookie config so
+    // set_session_cookies can emit the token cookie. Off by default.
+    cfg.cookies.csrf_enabled = c.get<bool>("security.csrf.enabled", "SECURITY_CSRF_ENABLED", false);
+    cfg.cookies.csrf_cookie_name =
+        c.get<std::string>("security.csrf.cookie_name", "SECURITY_CSRF_COOKIE", "csrf-token");
     spdlog::info("Auth cookies: enabled={} access_name={} samesite={} secure={}",
                  cfg.cookies.enabled,
                  cfg.cookies.access_name,

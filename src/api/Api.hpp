@@ -44,6 +44,7 @@ inline void register_controllers() {
     // rejected before paying for auth / rate limit / idempotency lookups.
     middleware::register_content_type_check();
     middleware::register_auth();
+    middleware::register_csrf();
     middleware::register_rate_limit();
     middleware::register_idempotency();
     middleware::register_cors();
