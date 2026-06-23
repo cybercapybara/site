@@ -53,7 +53,7 @@ demoReset:
 
 cpp-api:
   image:
-    tag: "4d575e58"     # pinned known-good amd64 build; bump when a newer one ships
+    tag: "v1.1.0"     # pinned known-good amd64 build; bump when a newer one ships
   externalKafka:
     enabled: false
   externalDatabase:
@@ -70,7 +70,7 @@ cpp-api:
 
 cpp-worker:
   image:
-    tag: "4d575e58"
+    tag: "v1.1.0"
   externalDatabase:
     password: "SET-AT-DEPLOY"
   externalRedis:
@@ -87,4 +87,4 @@ cpp-worker:
 
 cpp-frontend:
   image:
-    tag: "4d575e58"
+    tag: "v1.1.0"
