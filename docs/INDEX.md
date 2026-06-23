@@ -81,9 +81,11 @@ question instead of grepping the tree.
 | `init-project.sh` | One-shot rename of template identity (project name, registry, helm charts) |
 | `new-resource.sh` | Scaffold a FULL CRUD resource (domain + repository + controller + registry + openapi + test) per docs/CONVENTIONS.md |
 | `new-endpoint.sh` | Scaffold a single controller + registry row + optional test + optional OpenAPI patch |
+| `new-job.sh` | Scaffold a background-job handler that self-registers with the dispatcher (one `#include` to wire into the worker) |
 | `new-migration.sh` | Generate the next `NNN_<slug>.sql` |
+| `new-react-page.sh` | Scaffold a frontend admin page (hook + query keys + route) |
 | `check-openapi-drift.sh` | Verify `Api::get_endpoints()` (src/api/Endpoints.hpp) ↔ `docs/openapi.yaml` (method, path) |
-| `check-test-buckets.sh` | Verify the unit/integration test-bucket filter is in sync across Makefile/CMake/CI |
+| `check-test-buckets.sh` | Verify test suites sit in the right bucket — classified by DIRECTORY, fails on a suite-name clash across unit/integration |
 | `prod-check.sh` | Pre-deploy assertions on a production config (auth, secrets, TLS, fail-closed) |
 | `lint-openapi.sh` | Spectral lint with project ruleset |
 | `make-jwt.sh` | Mint a dev HS256 JWT (no Python/Node deps) |

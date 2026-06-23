@@ -413,6 +413,18 @@ new-migration:     ## Generate the next migrations/NNN_<slug>.sql: make new-migr
 	@if [ -z "$(SLUG)" ]; then echo "Usage: make new-migration SLUG=<short_description>"; exit 1; fi
 	./scripts/new-migration.sh $(SLUG)
 
+new-resource:      ## Scaffold a full CRUD resource: make new-resource ENTITY=Product
+	@if [ -z "$(ENTITY)" ]; then echo "Usage: make new-resource ENTITY=Product   (singular PascalCase)"; exit 1; fi
+	./scripts/new-resource.sh $(ENTITY)
+
+new-job:           ## Scaffold a background-job handler: make new-job TYPE=reindex [HANDLER=ReindexJob]
+	@if [ -z "$(TYPE)" ]; then echo "Usage: make new-job TYPE=reindex [HANDLER=ReindexJob]"; exit 1; fi
+	./scripts/new-job.sh $(TYPE) $(HANDLER)
+
+init:              ## Rebrand the template for your fork: make init NAME=my-service [REGISTRY=docker.io/myorg]
+	@if [ -z "$(NAME)" ]; then echo "Usage: make init NAME=my-service [REGISTRY=docker.io/myorg]"; exit 1; fi
+	./scripts/init-project.sh $(NAME) $(REGISTRY)
+
 seed:              ## Apply optional seed fixtures from migrations/seeds/*.sql (idempotent at your risk)
 	@if ! ls migrations/seeds/*.sql >/dev/null 2>&1; then \
 		echo "No fixtures in migrations/seeds/. Drop a *.sql file there and re-run."; exit 0; \

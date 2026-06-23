@@ -238,8 +238,16 @@ To stop everything: `make down`. To wipe volumes too (DESTRUCTIVE, drops users):
 
 ### First day — walkthrough for a new project
 
-After `init-project.sh` you're on your own schema / business logic. Typical
-order:
+After `init-project.sh` you're on your own schema / business logic.
+
+**Fastest path — a whole CRUD resource in one shot:**
+`./scripts/new-resource.sh Product` (or `make new-resource ENTITY=Product`)
+generates the migration, domain DTO, repository (on `CrudBase`), admin-gated
+controller, route-registry row, OpenAPI block and an integration test —
+following [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md). Then fill in your real
+columns. The finer-grained steps below are for adding pieces individually.
+
+Typical order:
 
 1. **Add your first migration** — drop `migrations/001_<topic>.sql`. See
    [`migrations/README.md`](migrations/README.md) for naming and
@@ -260,6 +268,10 @@ order:
    test-runner image in ~5 s instead of the ~2 min cold rebuild of `make test`.
 6. **Verify migrations didn't drift** — `docker compose exec app ./cpp_api_template --verify-migrations` exits
    non-zero if anything is pending.
+7. **Background work** — `./scripts/new-job.sh reindex` (or
+   `make new-job TYPE=reindex`) scaffolds a self-registering job handler under
+   `src/jobs/handlers/`; it prints the one `#include` to add to
+   `src/worker_main.cpp`. Submit work with `Jobs::submit("reindex", payload)`.
 
 ### Run the full tests
 
@@ -451,9 +463,10 @@ tests/
 docker/          Dockerfile + docker-compose.yml + env presets
 helm/            Helm charts (cpp-api, cpp-worker, cpp-frontend + cpp-env umbrella), values documented
 scripts/         make-jwt.sh, smoke.sh, init-project.sh, bench.sh,
-                 new-endpoint.sh (with --with-test / --patch-openapi),
-                 new-migration.sh, check-openapi-drift.sh, lint-openapi.sh,
-                 env-check.sh
+                 new-resource.sh (full CRUD), new-endpoint.sh (single
+                 controller, --with-test / --patch-openapi), new-job.sh
+                 (job handler), new-react-page.sh, new-migration.sh,
+                 check-openapi-drift.sh, lint-openapi.sh, env-check.sh
 docs/            openapi.yaml, CONFIG.md, EXAMPLES.md, INDEX.md, adr/, Doxyfile
 ```
 
@@ -478,7 +491,10 @@ docs/            openapi.yaml, CONFIG.md, EXAMPLES.md, INDEX.md, adr/, Doxyfile
 | `make routes` / `make health` | Print endpoint table / hit health probes |
 | `make psql` / `make redis-cli` | Open a shell against the running stack |
 | `make migrate` / `make migrate-local` / `make migrate-status` / `make migrate-reset` | Run (Docker or native) / inspect / nuke-and-reapply migrations |
+| `make init NAME=… [REGISTRY=…]` | Rebrand the template for your fork via `scripts/init-project.sh` |
+| `make new-resource ENTITY=Product` | Scaffold a full CRUD resource via `scripts/new-resource.sh` |
 | `make new-endpoint NAME=… METHOD=… PATH_=… [WITH_TEST=1] [PATCH_OPENAPI=1]` | Scaffold a controller via `scripts/new-endpoint.sh` |
+| `make new-job TYPE=… [HANDLER=…]` | Scaffold a background-job handler via `scripts/new-job.sh` |
 | `make new-migration SLUG=…` | Generate the next `migrations/NNN_<slug>.sql` |
 | `make seed` | Apply optional `migrations/seeds/*.sql` fixtures |
 | `make logs` / `make logs-pretty` / `make logs-worker` | Tail logs (json-pretty via jq, worker variant) |
