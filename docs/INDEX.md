@@ -12,6 +12,7 @@ question instead of grepping the tree.
 | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) | Pre-commit setup, dev workflow, commit-message convention, release flow |
 | [`../SECURITY.md`](../SECURITY.md) | Disclosure policy + production-hardening checklist |
 | [`../CHANGELOG.md`](../CHANGELOG.md) | Versioned change log (semver, edited under `## [Unreleased]`) |
+| [`../REMOVING-THE-DEMO.md`](../REMOVING-THE-DEMO.md) | What's reference-only (flask-base) vs the real app, and how to strip it (`init-project.sh --no-demo`) |
 
 ## Worked examples & deep-dives
 
