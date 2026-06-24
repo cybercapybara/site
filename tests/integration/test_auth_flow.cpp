@@ -27,6 +27,7 @@
 #include <nlohmann/json.hpp>
 
 #include "api/AuthController.hpp"
+#include "database/Database.hpp"
 #include "repositories/UserRepository.hpp"
 #include "test_helpers.hpp"
 
@@ -128,6 +129,16 @@ TEST_F(AuthFlowTest, loginWrongPasswordReturns401Generic) {
     auto body = json::parse(std::string(badr->body()));
     // Generic code — no "user_not_found" leakage.
     EXPECT_EQ(body["error"].get<std::string>(), "invalid_credentials");
+
+    // The failed attempt is recorded in the audit trail so brute-force is
+    // visible (previously only successful admin actions were audited).
+    long audited = Database::get().execute_read([&](auto& txn) {
+        auto r = txn.exec_params(
+            "SELECT COUNT(*) FROM audit_log WHERE action = 'auth.login_failed' AND details->>'email' = $1",
+            "carol@example.com");
+        return r.at(0).at(0).template as<long>();
+    });
+    EXPECT_EQ(audited, 1);
 }
 
 TEST_F(AuthFlowTest, loginSucceedsAndSetsCookies) {
