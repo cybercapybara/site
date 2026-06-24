@@ -155,11 +155,8 @@ public:
             std::string ip = req->getHeader("X-Real-IP");
             if (ip.empty())
                 ip = req->peerAddr().toIp();
-            Security::Audit::record(/*actor_id=*/"",
-                                    "auth.login_failed",
-                                    "user",
-                                    user ? user->id : "",
-                                    {{"email", email}, {"ip", ip}});
+            Security::Audit::record(
+                /*actor_id=*/"", "auth.login_failed", "user", user ? user->id : "", {{"email", email}, {"ip", ip}});
             // Single message for missing-user + bad-password to defeat enumeration.
             callback(ErrorResponse::unauthorized("invalid_credentials", "Invalid email or password"));
             return;

@@ -14,9 +14,10 @@
 #include <string>
 #include <vector>
 
-#include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 #include <sw/redis++/redis++.h>
+
+#include <nlohmann/json.hpp>
 
 #include "utils/Strings.hpp"
 
