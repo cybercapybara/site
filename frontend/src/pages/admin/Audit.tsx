@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { DataTable, type Column } from '@/components/DataTable';
@@ -211,34 +211,57 @@ export function AdminAuditPage() {
         </CardContent>
       </Card>
 
-      {selected && <AuditDetailCard entry={selected} onClose={() => setSelected(null)} />}
+      {selected && <AuditDetailModal entry={selected} onClose={() => setSelected(null)} />}
     </div>
   );
 }
 
-function AuditDetailCard({ entry, onClose }: { entry: AuditEntry; onClose: () => void }) {
+/**
+ * Detail view as a centered modal over the page (was a card appended at the
+ * bottom — you had to scroll past the whole table to see it). Closes on the
+ * backdrop, the Close button, or Escape.
+ */
+function AuditDetailModal({ entry, onClose }: { entry: AuditEntry; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   return (
-    <Card>
-      <CardContent className="space-y-3 pt-6 text-sm">
-        <div className="flex items-start justify-between">
-          <div>
-            <p className="font-mono text-base">{entry.action}</p>
-            <p className="text-muted-foreground">
-              {formatTimestamp(entry.created_at)} · {entry.target_type}
-              {entry.target_id ? ` ${entry.target_id}` : ''}
-            </p>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+    >
+      <Card
+        className="max-h-[85vh] w-full max-w-lg overflow-auto"
+        onClick={(ev) => ev.stopPropagation()}
+      >
+        <CardContent className="space-y-3 pt-6 text-sm">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="font-mono text-base">{entry.action}</p>
+              <p className="text-muted-foreground">
+                {formatTimestamp(entry.created_at)} · {entry.target_type}
+                {entry.target_id ? ` ${entry.target_id}` : ''}
+              </p>
+            </div>
+            <Button size="sm" variant="ghost" onClick={onClose}>
+              Close
+            </Button>
           </div>
-          <Button size="sm" variant="ghost" onClick={onClose}>
-            Close
-          </Button>
-        </div>
-        <div>
-          <p className="mb-1 font-medium">Details</p>
-          <pre className="overflow-x-auto rounded bg-muted p-3 text-xs">
-            {JSON.stringify(entry.details, null, 2)}
-          </pre>
-        </div>
-      </CardContent>
-    </Card>
+          <div>
+            <p className="mb-1 font-medium">Details</p>
+            <pre className="overflow-x-auto rounded bg-muted p-3 text-xs">
+              {JSON.stringify(entry.details, null, 2)}
+            </pre>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
