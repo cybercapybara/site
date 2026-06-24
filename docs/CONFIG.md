@@ -24,7 +24,7 @@ Set `CONFIG_FILE` to point at a different JSON file (e.g.
 |---|---|---|---|---|
 | `SERVER_HOST` | `server.host` | string | `0.0.0.0` | Listen address |
 | `SERVER_PORT` | `server.port` | int | `8080` | |
-| `SERVER_THREADS` | `server.threads` | int | `4` | Drogon event-loop threads |
+| `SERVER_THREADS` | `server.threads` | int | `0` (auto = #cores) | Drogon event-loop threads. Under the **synchronous** pqxx model the in-flight DB-call count is capped by THIS, not by `database.pool_size` — it's the real concurrency knob. `0`/unset auto-sizes to the CPU count; keep `database.pool_size` ≥ threads (the app warns at boot if not). |
 | `SERVER_MAX_BODY_BYTES` | `server.max_body_bytes` | int | `10485760` | 10 MB cap on request bodies — prevents memory blow-up from a single client. Bump for file uploads. |
 | `SERVER_SSL_ENABLED` | `server.ssl.enabled` | bool | `false` | Off by default — production terminates TLS at the ingress/reverse proxy (the Helm chart assumes this). Exposing the app directly (bare-metal, no proxy)? set `true` + cert/key, else traffic is plain HTTP. |
 | `SSL_CERT_FILE` | `server.ssl.cert` | string | — | PEM cert path when SSL on |
@@ -107,7 +107,7 @@ Set `CONFIG_FILE` to point at a different JSON file (e.g.
 |---|---|---|---|---|
 | `DATABASE_PRIMARY_URL` | `database.primary` | string | `postgresql://localhost:5432/appdb` | Connection string |
 | `DATABASE_REPLICA_URLS` | `database.replicas` | csv | — | Read replicas |
-| `DB_POOL_SIZE` | `database.pool_size` | int | `10` | |
+| `DB_POOL_SIZE` | `database.pool_size` | int | `10` | Per-pool connections (primary + each replica). Keep ≥ `server.threads`: a smaller pool makes IO threads queue on `acquire()`; a much larger pool leaves the extra connections inert (and the `db_pool` saturation gauge under-reports). |
 | `DB_ACQUIRE_TIMEOUT_MS` | `database.acquire_timeout_ms` | int | `5000` | |
 | `DB_STATEMENT_TIMEOUT_MS` | `database.statement_timeout_ms` | int | `30000` | Per-connection PostgreSQL `statement_timeout`. `0` disables. |
 | `DB_MIGRATIONS_ENABLED` | `database.migrations_enabled` | bool | `true` | Set `false` when init-container runs them |

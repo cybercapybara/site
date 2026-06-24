@@ -243,7 +243,29 @@ int run_server(const std::string& config_file) {
 
     std::string host = config.get<std::string>("server.host", "SERVER_HOST", "0.0.0.0");
     int port = config.get<int>("server.port", "SERVER_PORT", 8080);
-    int threads = config.get<int>("server.threads", "SERVER_THREADS", 4);
+    int threads = config.get<int>("server.threads", "SERVER_THREADS", 0);
+    if (threads <= 0) {
+        // 0 / unset = auto: one IO thread per core. Under the synchronous pqxx
+        // model, in-flight DB calls are capped by the THREAD count — not by
+        // database.pool_size — so this is the real concurrency knob.
+        const unsigned hc = std::thread::hardware_concurrency();
+        threads = static_cast<int>(hc > 0 ? hc : 4);
+    }
+    // Effective DB concurrency is min(threads, pool). A pool smaller than the
+    // thread count makes threads queue on acquire() (latency spikes that look
+    // like a slow DB); a pool much larger leaves the extra connections inert and
+    // makes the db_pool saturation gauge under-report. Warn so they're tuned
+    // together; see docs/CONFIG.md.
+    {
+        const int db_pool = config.get<int>("database.pool_size", "DB_POOL_SIZE", 10);
+        if (db_pool < threads) {
+            spdlog::warn(
+                "server.threads={} exceeds database.pool_size={}: IO threads will contend for DB "
+                "connections (acquire stalls under load). Raise database.pool_size to >= threads.",
+                threads,
+                db_pool);
+        }
+    }
     bool enable_ssl = config.get<bool>("server.ssl.enabled", "SERVER_SSL_ENABLED", false);
     // Cap request body to keep a single client from arbitraging memory.
     // 10 MB is generous for JSON APIs; bump for file uploads and configure
