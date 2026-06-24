@@ -40,15 +40,28 @@ case there if your entity has a sensitive field.
 
 ## 3. Repository — `src/repositories/<Entity>Repository.hpp`
 
-Model after `UserRepository` / `RoleRepository`:
+Extend `CrudBase` (model after `RoleRepository`; `UserRepository` is the
+hand-written variant because it joins roles):
 
-- Typed exceptions (`Duplicate<Entity>`, `<Entity>NotFound`) — 3 lines each.
-- Every method wraps `Database::get().execute_read/execute_write([&](auto& txn){…})`.
-  The lambda MUST take `auto& txn` (it receives `detail::TracingTxn&`, not a
-  raw `pqxx::work&`).
-- Wrap writes that can hit UNIQUE/FK in `detail::translate_sql(...)`
-  (`repositories/SqlErrors.hpp`) to turn SQLSTATE into your typed exception —
+- `class FooRepository : public CrudBase<FooRepository, Domain::Foo, std::string>`
+  + four `static constexpr` constants (`kTable` / `kColumns` / `kIdColumn` /
+  `kOrderBy`). CrudBase then supplies `find(id)` / `list(limit, offset)` /
+  `count()` — don't re-hand-roll them. Hand-write only the bespoke writes.
+- Typed exceptions deriving from the generic bases in
+  `repositories/RepoErrors.hpp` — `struct FooNotFound : NotFoundError` (→404),
+  `struct DuplicateFoo : ConflictError` (→409). They carry their own code, so
+  `with_repo_errors` maps them without knowing the concrete type.
+- Every write wraps `Database::get().execute_write([&](auto& txn){…})`. The
+  lambda MUST take `auto& txn` (it receives `detail::TracingTxn&`, not a raw
+  `pqxx::work&`). Use `execute_read_primary` for read-after-write.
+- Wrap UNIQUE/FK-tripping writes in `detail::translate_sql(...)`
+  (`repositories/SqlErrors.hpp`) to turn a SQLSTATE into your typed exception —
   otherwise a constraint violation surfaces as a raw 500.
+- **Per-user resources:** add `static constexpr const char* kOwnerColumn =
+  "owner_id";` to unlock CrudBase's `find_owned/list_owned/count_owned`, and
+  gate the controller with `API_REQUIRE_OWNER`. Scaffold it with
+  `new-resource.sh <Entity> --owned`. Plain `find`/`list` on an owned table is
+  an IDOR.
 - The repository must NOT know about HTTP. It throws; the controller maps.
 
 ## 4. Controller — `src/api/<Entity>Controller.hpp`
