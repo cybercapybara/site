@@ -30,8 +30,20 @@ TEST_F(CacheCachedTest, LoaderRunsOnceThenServesFromCache) {
 
 TEST_F(CacheCachedTest, DistinctKeysLoadIndependently) {
     int calls = 0;
-    EXPECT_EQ(Cache::cached<int>("a", 60, [&] { ++calls; return 1; }), 1);
-    EXPECT_EQ(Cache::cached<int>("b", 60, [&] { ++calls; return 2; }), 2);
+    EXPECT_EQ(Cache::cached<int>("a",
+                                 60,
+                                 [&] {
+                                     ++calls;
+                                     return 1;
+                                 }),
+              1);
+    EXPECT_EQ(Cache::cached<int>("b",
+                                 60,
+                                 [&] {
+                                     ++calls;
+                                     return 2;
+                                 }),
+              2);
     EXPECT_EQ(calls, 2);
 }
 

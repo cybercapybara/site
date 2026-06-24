@@ -90,10 +90,10 @@ public:
     // resources are unaffected. Pair with API_REQUIRE_OWNER in the controller.
     std::optional<Entity> find_owned(const KeyT& id, const std::string& owner_id, bool from_primary = false) {
         auto query = [&](auto& txn) -> std::optional<Entity> {
-            auto r = txn.exec_params(select_prefix() + " WHERE " + Derived::kIdColumn + " = $1 AND " +
-                                         Derived::kOwnerColumn + " = $2",
-                                     id,
-                                     owner_id);
+            auto r = txn.exec_params(
+                select_prefix() + " WHERE " + Derived::kIdColumn + " = $1 AND " + Derived::kOwnerColumn + " = $2",
+                id,
+                owner_id);
             if (r.empty())
                 return std::nullopt;
             return Entity::from_row(r[0]);

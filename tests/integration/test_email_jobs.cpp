@@ -57,9 +57,7 @@ protected:
     }
 
     /// Shared cleanup: blobs + queue/dlq/index keys for the email job types.
-    static void drain_queue() {
-        TestHelpers::drain_jobs({Email::AccountEmails::kJobType, Email::SendEmail::kJobType});
-    }
+    static void drain_queue() { TestHelpers::drain_jobs({Email::AccountEmails::kJobType, Email::SendEmail::kJobType}); }
 
     Domain::User make_user(const std::string& email) {
         Repositories::RoleRepository roles;
