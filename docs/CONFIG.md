@@ -88,6 +88,17 @@ Set `CONFIG_FILE` to point at a different JSON file (e.g.
 | `DOCS_ENABLED` | `docs.enabled` | bool | `false` | Mount `/api/docs` + `/api/openapi.yaml` — dev only |
 | `DOCS_OPENAPI_PATH` | `docs.openapi_path` | string | `docs/openapi.yaml` | Path served at `/api/openapi.yaml` |
 
+## Object storage
+
+`Storage::get()` is a get/put/remove seam (`src/storage/Storage.hpp`). Only the
+`local` filesystem backend ships; swap in S3/GCS by subclassing `StorageBackend`.
+
+| Env | JSON key | Type | Default | Notes |
+|---|---|---|---|---|
+| `STORAGE_BACKEND` | `storage.backend` | string | `local` | Only `local` is built in; any other value fails fast at boot |
+| `STORAGE_LOCAL_ROOT` | `storage.local.root` | string | `data/uploads` | Directory the local backend writes objects under (gitignored) |
+| `STORAGE_PUBLIC_BASE_URL` | `storage.public_base_url` | string | — | Prepended to a key by `url()` (e.g. a CDN base); empty → returns the bare key |
+
 ## Observability
 
 | Env | JSON key | Type | Default | Notes |
