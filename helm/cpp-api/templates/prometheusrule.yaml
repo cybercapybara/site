@@ -63,6 +63,17 @@ spec:
             summary: "p99 latency over {{ .Values.monitoring.thresholds.latencyP99Sec | default 1 }}s"
             description: "Investigate slow queries, pool saturation, or downstream latency."
 
+        - alert: CppApiHighReplicaLag
+          expr: |
+            db_replica_lag_seconds{ {{ $selector }} } > {{ .Values.monitoring.thresholds.replicaLagSec | default 10 }}
+          for: 5m
+          labels:
+            severity: warning
+            service: {{ include "cpp-api.fullname" . }}
+          annotations:
+            summary: "Read replica lagging > {{ .Values.monitoring.thresholds.replicaLagSec | default 10 }}s behind primary"
+            description: "Read-after-write reads may serve stale rows. Check replica health, network, or WAL apply load (only fires when replicas are configured)."
+
         - alert: CppApiPodNotReady
           expr: |
             kube_pod_status_ready{condition="true", namespace="{{ .Release.Namespace }}", pod=~"{{ include "cpp-api.fullname" . }}-.*"} == 0

@@ -145,6 +145,7 @@ monitoring:
     errorRate: 0.01                 # Fraction of 5xx allowed (1 %)
     latencyP99Sec: 1                # p99 seconds
     dlqDepth: 10                    # total job_dlq_depth above this pages
+    replicaLagSec: 10               # read-replica lag (s) above this warns
     dlqPerTypeDepth: 5              # single-type DLQ depth that pages
     retriesExhaustedPerSec: 0.5     # sustained "gave up" retries per second
 
