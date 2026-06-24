@@ -32,6 +32,7 @@
 #include "security/Auth.hpp"
 #include "security/Idempotency.hpp"
 #include "security/RateLimit.hpp"
+#include "storage/Storage.hpp"
 #include "tasks/Tasks.hpp"
 #include "utils/Config.hpp"
 #include "utils/Strings.hpp"
@@ -125,6 +126,7 @@ public:
             }
 
             init_cache_(cfg);
+            Storage::initialize(cfg);
             if (mode != InitMode::Worker) {
                 init_messaging_(cfg);
                 Tasks::initialize();

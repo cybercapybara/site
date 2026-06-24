@@ -140,3 +140,6 @@ docker/.jwt-dev-secret
 
 # Demo env generated secrets (never commit)
 helm/cpp-env/.demo-secrets.env
+
+# Local file-storage backend (Storage::LocalStorage) — never commit uploads
+data/uploads/
