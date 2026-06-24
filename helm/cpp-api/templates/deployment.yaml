@@ -173,6 +173,14 @@ spec:
             # explicitly. fail_open=true means Redis outages don't block traffic.
             - name: RATE_LIMIT_ENABLED
               value: {{ .Values.rateLimit.enabled | quote }}
+            # trust_proxy / trusted_proxy_count describe the proxy topology (how
+            # to derive the real client IP). The audit trail and any IP logging
+            # use them too — not only the limiter — so render them regardless of
+            # whether rate limiting itself is enabled.
+            - name: RATE_LIMIT_TRUST_PROXY
+              value: {{ .Values.rateLimit.trustProxy | quote }}
+            - name: RATE_LIMIT_TRUSTED_PROXY_COUNT
+              value: {{ .Values.rateLimit.trustedProxyCount | quote }}
             {{- if .Values.rateLimit.enabled }}
             - name: RATE_LIMIT_REQUESTS
               value: {{ .Values.rateLimit.requests | quote }}
@@ -180,10 +188,6 @@ spec:
               value: {{ .Values.rateLimit.windowSec | quote }}
             - name: RATE_LIMIT_SCOPE
               value: {{ .Values.rateLimit.scope | quote }}
-            - name: RATE_LIMIT_TRUST_PROXY
-              value: {{ .Values.rateLimit.trustProxy | quote }}
-            - name: RATE_LIMIT_TRUSTED_PROXY_COUNT
-              value: {{ .Values.rateLimit.trustedProxyCount | quote }}
             - name: RATE_LIMIT_FAIL_OPEN
               value: {{ .Values.rateLimit.failOpen | quote }}
             {{- with .Values.rateLimit.whitelist }}
