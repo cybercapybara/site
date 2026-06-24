@@ -45,10 +45,13 @@ using json = nlohmann::json;
 
 enum class AuthMode { None, Bearer, Jwt };
 
-// Permission bitmask that denotes a full administrator. Mirrors
-// Domain::Permission::kAdminister; duplicated here (rather than including
-// Domain) to keep the Auth layer below the Domain layer. Keep in sync.
-inline constexpr std::uint32_t kAdminPermissionBits = 0xffu;
+// Permission bitmask that denotes a full administrator: a DEDICATED sentinel
+// bit, NOT 0xff "all bits" (with 0xff a role accumulating the eight low feature
+// bits would accidentally become admin). Mirrors Domain::Permission::kAdminister
+// — duplicated here (rather than including Domain) to keep the Auth layer below
+// the Domain layer. MUST stay in sync; tests/unit/test_auth_permissions.cpp
+// asserts equality so the two can't drift.
+inline constexpr std::uint32_t kAdminPermissionBits = 0x40000000u;
 
 struct AuthConfig {
     AuthMode mode = AuthMode::None;
@@ -431,7 +434,14 @@ inline std::uint32_t current_permissions(const drogon::HttpRequestPtr& req) {
 }
 
 inline bool current_user_can(const drogon::HttpRequestPtr& req, std::uint32_t perm) {
-    return (current_permissions(req) & perm) == perm;
+    const std::uint32_t have = current_permissions(req);
+    // The admin sentinel bit satisfies EVERY permission check — admin can do
+    // anything. This was implicit when admin was 0xff (all low feature bits);
+    // with the dedicated sentinel bit it must be explicit, or admins would be
+    // rejected by feature-permission gates (e.g. Permission::kAuditRead).
+    if ((have & kAdminPermissionBits) == kAdminPermissionBits)
+        return true;
+    return (have & perm) == perm;
 }
 
 inline bool current_user_is_admin(const drogon::HttpRequestPtr& req) {

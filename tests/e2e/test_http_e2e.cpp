@@ -31,6 +31,7 @@
 
 #include "api/Api.hpp"
 #include "core/Core.hpp"
+#include "domain/Role.hpp"
 #include "security/Auth.hpp"
 #include "test_helpers.hpp"
 
@@ -317,7 +318,8 @@ TEST(HttpE2E, AdminGateChecksPermissionBitmask) {
     REQUIRE_E2E_ENV();
     const auto now = Utils::Time::now_epoch_seconds();
 
-    json admin_claims = {{"sub", "e2e-admin"}, {"iat", now}, {"exp", now + 600}, {"permissions", 255}};
+    json admin_claims = {
+        {"sub", "e2e-admin"}, {"iat", now}, {"exp", now + 600}, {"permissions", Domain::Permission::kAdminister}};
     json user_claims = {{"sub", "e2e-user"}, {"iat", now}, {"exp", now + 600}, {"permissions", 1}};
     const auto admin_jwt = Security::Auth::issue_hs256_jwt(admin_claims, kSecret);
     const auto user_jwt = Security::Auth::issue_hs256_jwt(user_claims, kSecret);
