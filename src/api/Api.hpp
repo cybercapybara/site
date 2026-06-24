@@ -21,6 +21,7 @@
 // them in here is what puts the routes into main.cpp's binary.
 #include "api/AccountController.hpp"
 #include "api/AdminController.hpp"
+#include "api/ApiKeyController.hpp"
 #include "api/AuditController.hpp"
 #include "api/AuthController.hpp"
 #include "api/HealthController.hpp"

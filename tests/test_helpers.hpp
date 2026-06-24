@@ -266,9 +266,12 @@ inline void remove_temp_config(const std::string& path = "test_temp_config.json"
 // ---------------------------------------------------------------------------
 
 /// Wipe the users table between tests. Requires Database to be initialized.
+/// CASCADE so tables with an FK to users (api_keys, and any owner-scoped
+/// resource a fork adds) are cleared too — plain TRUNCATE errors on a referenced
+/// table.
 inline void truncate_users() {
     Database::get().execute_write([](auto& txn) {
-        txn.exec("TRUNCATE TABLE users");
+        txn.exec("TRUNCATE TABLE users CASCADE");
         return 0;
     });
 }

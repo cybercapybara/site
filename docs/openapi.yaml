@@ -497,6 +497,43 @@ paths:
         '200': { description: Password updated }
         '401': { description: Wrong current password or not authenticated }
 
+  /api/account/api-keys:
+    get:
+      summary: List your API keys (metadata only; never the secret)
+      tags: [account]
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200': { description: Array of API key metadata under data[] }
+        '401': { description: Not authenticated }
+    post:
+      summary: Create an API key — the secret is returned ONCE in this response
+      tags: [account]
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        '201': { description: Key created; `key` field holds the one-time secret }
+        '401': { description: Not authenticated }
+
+  /api/account/api-keys/{id}:
+    delete:
+      summary: Revoke one of your API keys
+      tags: [account]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Key revoked }
+        '401': { description: Not authenticated }
+        '404': { description: No such key (or not yours) }
+
   # ── Admin (require Permission::ADMINISTER) ────────────────────────────────
   /api/admin/users:
     get:
