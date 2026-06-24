@@ -33,6 +33,7 @@
 #include "api/RequestUtils.hpp"
 #include "observability/Observability.hpp"
 #include "observability/Trace.hpp"
+#include "security/ApiKeys.hpp"
 #include "security/Auth.hpp"
 #include "security/Csrf.hpp"
 #include "security/Idempotency.hpp"
@@ -143,6 +144,16 @@ inline void register_auth() {
             // byte, leaking the static token through response timing.
             return Utils::Crypto::constant_time_equals(header, expected) ? drogon::HttpResponsePtr{}
                                                                          : unauthorized("invalid_token");
+        }
+        // Machine clients: a presented API key (X-API-Key, or an Authorization
+        // token with the cpk_ prefix) fully decides the request. Absent → fall
+        // through to the JWT/cookie path below. Honored in JWT mode only.
+        if (Security::ApiKeys::request_has_key(req)) {
+            auto key_principal = Security::ApiKeys::authenticate(req);
+            if (!key_principal)
+                return unauthorized("invalid_api_key");
+            req->attributes()->insert(Security::Auth::kPrincipalAttr, *key_principal);
+            return {};
         }
         // JWT — accept either the Authorization header or the configured
         // access cookie (cookie wins; SPAs never send the header). The

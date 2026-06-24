@@ -226,10 +226,11 @@ test:integration:
     # Unit tests first (fast, no infra — but infra is already up so run in same job
     # to avoid a second image pull)
     - docker compose --env-file .env --profile test run --rm -e TEST_BINARY=cpp_api_template_tests_unit test-runner
-    # Integration tests — need Postgres + Redis (already up above)
-    - docker compose --env-file .env --profile test run --rm -e TEST_BINARY=cpp_api_template_tests_integration test-runner
+    # Integration tests — need Postgres + Redis (already up above). CI_REQUIRE_INFRA
+    # makes a missing dependency FAIL instead of silently skipping every suite.
+    - docker compose --env-file .env --profile test run --rm -e CI_REQUIRE_INFRA=1 -e TEST_BINARY=cpp_api_template_tests_integration test-runner
     # E2E binary: real Drogon server + HTTP client (middleware chain on the wire)
-    - docker compose --env-file .env --profile test run --rm -e TEST_BINARY=cpp_api_template_e2e test-runner
+    - docker compose --env-file .env --profile test run --rm -e CI_REQUIRE_INFRA=1 -e TEST_BINARY=cpp_api_template_e2e test-runner
   after_script:
     - cd docker && docker compose --env-file .env --profile test down -v || true
   rules:
@@ -349,6 +350,7 @@ lint:openapi-drift:
     - apk add --no-cache bash gawk
   script:
     - ./scripts/check-openapi-drift.sh
+    - ./scripts/check-routes-registered.sh
     - ./scripts/check-test-buckets.sh
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"

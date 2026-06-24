@@ -142,11 +142,14 @@ Notes:
 
 ## 3. Repository
 
-`src/repositories/PostRepository.hpp`. The shipped
-`src/repositories/UserRepository.hpp` is the full, production version of this
-pattern (typed `DuplicateEmail`/`UserNotFound`, `execute_read_primary` for
-read-after-write, `detail::translate_sql` for SQLSTATE mapping) — copy its
-shape:
+`src/repositories/PostRepository.hpp`. This is exactly the shape
+`./scripts/new-resource.sh Post` generates: extend `CrudBase`, declare four
+constants, and hand-write only the bespoke writes. `CrudBase`
+(`src/repositories/CrudBase.hpp`) supplies `find(id)` / `list(limit, offset)` /
+`count()` from those constants, so you don't re-implement the mechanical reads.
+The shipped `RoleRepository` is the production version of this exact pattern;
+`UserRepository` is a hand-written variant (it joins roles, so it keeps its own
+queries).
 
 ```cpp
 #pragma once
@@ -154,59 +157,43 @@ shape:
 #include <optional>
 #include <stdexcept>
 #include <string>
-#include <vector>
-#include <pqxx/pqxx>
 
 #include "database/Database.hpp"
 #include "domain/Post.hpp"
-#include "repositories/SqlErrors.hpp"  // detail::translate_sql, shipped helper
+#include "repositories/CrudBase.hpp"
+#include "repositories/RepoErrors.hpp"  // NotFoundError / ConflictError bases
+#include "repositories/SqlErrors.hpp"   // detail::translate_sql, shipped helper
 
 namespace Repositories {
 
-struct PostNotFound : std::runtime_error {
-    PostNotFound() : std::runtime_error("post not found") {}
+// Derive from the generic bases so Api::with_repo_errors maps them to the right
+// status (404 / 409) WITHOUT the shared handler knowing this concrete type.
+struct PostNotFound : NotFoundError {
+    PostNotFound() : NotFoundError("post") {}
 };
 
-class PostRepository {
+class PostRepository : public CrudBase<PostRepository, Domain::Post, std::string> {
 public:
-    static constexpr const char* kSelect =
-        "SELECT id, title, body, author_id, published, created_at, updated_at FROM posts ";
+    // CrudBase supplies find(id) / list(limit, offset) / count() from these four.
+    static constexpr const char* kTable    = "posts";
+    static constexpr const char* kColumns  = "id, title, body, author_id, published, created_at";
+    static constexpr const char* kIdColumn = "id";
+    static constexpr const char* kOrderBy  = "created_at DESC";
 
-    std::optional<Domain::Post> find(const std::string& id) {
-        return Database::get().execute_read([&](auto& txn) -> std::optional<Domain::Post> {
-            auto r = txn.exec_params(std::string(kSelect) + "WHERE id = $1", id);
-            if (r.empty()) return std::nullopt;
-            return Domain::Post::from_row(r[0]);
-        });
-    }
-
-    std::vector<Domain::Post> list(int limit = 100, int offset = 0) {
-        return Database::get().execute_read([&](auto& txn) {
-            auto r = txn.exec_params(
-                std::string(kSelect) + "ORDER BY created_at DESC LIMIT $1 OFFSET $2", limit, offset);
-            std::vector<Domain::Post> out;
-            out.reserve(r.size());
-            for (const auto& row : r) out.push_back(Domain::Post::from_row(row));
-            return out;
-        });
-    }
-
-    Domain::Post create(const std::string& title,
-                        const std::string& body,
-                        const std::string& author_id) {
+    // Only the writes are bespoke. Wrap UNIQUE/FK-tripping writes in
+    // detail::translate_sql so a SQLSTATE becomes a typed exception, not a 500.
+    Domain::Post create(const std::string& title, const std::string& body, const std::string& author_id) {
         return Database::get().execute_write([&](auto& txn) {
             auto r = txn.exec_params(
-                "INSERT INTO posts (title, body, author_id) VALUES ($1, $2, $3) "
-                "RETURNING id, title, body, author_id, published, created_at, updated_at",
+                std::string("INSERT INTO posts (title, body, author_id) VALUES ($1, $2, $3) RETURNING ") + kColumns,
                 title, body, author_id);
             return Domain::Post::from_row(r[0]);
         });
     }
 
-    // Hard delete — matches the shipped UserRepository::remove(). The template
-    // has NO soft-delete anywhere (no deleted_at column, no is_active flag);
-    // if you want soft-delete, add a `deleted_at TIMESTAMPTZ` column in the
-    // migration and filter `WHERE deleted_at IS NULL` in every read.
+    // Hard delete — the template has NO soft-delete (no deleted_at / is_active).
+    // For soft-delete: add a `deleted_at TIMESTAMPTZ` column and filter
+    // `WHERE deleted_at IS NULL` in every read.
     void remove(const std::string& id) {
         Database::get().execute_write([&](auto& txn) {
             auto r = txn.exec_params("DELETE FROM posts WHERE id = $1 RETURNING id", id);
@@ -214,29 +201,33 @@ public:
             return 0;
         });
     }
-
-    // update() follows the same shape as UserRepository::admin_update():
-    // one UPDATE ... COALESCE statement wrapped in detail::translate_sql so a
-    // UNIQUE / FK violation surfaces as a typed exception, not a SQLSTATE string.
 };
 
 }  // namespace Repositories
 ```
 
+**Per-user (owner-scoped) resources.** If a `Post` belongs to a user, generate
+it with `./scripts/new-resource.sh Post --owned`. The migration gets an
+`owner_id` FK, the repo declares `static constexpr const char* kOwnerColumn =
+"owner_id";` (which unlocks CrudBase's `find_owned(id, owner)` /
+`list_owned(owner, …)` / `count_owned(owner)`), and the controller gates with
+`API_REQUIRE_OWNER` and passes the caller as the owner — so one user can **never**
+read or delete another's rows. Reaching for the plain `find`/`list` on a
+user-owned table is an IDOR; the owner-scoped methods exist so you don't.
+
 Key rules the repository enforces, not the controller:
 
-- Every SQL string for the `posts` table lives here — controllers never
-  touch pqxx. The lambda takes `[&](auto& txn)`: `execute_read` /
-  `execute_write` hand it a `detail::TracingTxn&`, not a raw
-  `pqxx::work&` / `pqxx::read_transaction&`.
-- Constraint violations surface as typed exceptions (translate them with the
-  shipped `detail::translate_sql` from `repositories/SqlErrors.hpp`, exactly
-  like `UserRepository::create` maps SQLSTATE `23505` → `DuplicateEmail`), so
-  the HTTP layer maps them to 409 without string-sniffing.
-- `find` returns `std::optional` — the controller decides whether that's
-  404 or a cache miss.
-- There is no soft-delete in the template. `remove()` is a hard `DELETE`,
-  matching `UserRepository::remove()`.
+- Every SQL string for the `posts` table lives here — controllers never touch
+  pqxx. The lambda takes `[&](auto& txn)`: `execute_read` / `execute_write` hand
+  it a `detail::TracingTxn&`, not a raw `pqxx::work&` / `pqxx::read_transaction&`.
+- Constraint violations surface as typed exceptions deriving from
+  `NotFoundError` / `ConflictError` (`repositories/RepoErrors.hpp`); translate
+  SQLSTATE with `detail::translate_sql` (`repositories/SqlErrors.hpp`), exactly
+  like `UserRepository::create` maps `23505` → `DuplicateEmail`. The HTTP layer
+  then maps them to 404 / 409 without string-sniffing or knowing the type.
+- `find` returns `std::optional` — the controller decides 404 vs cache miss.
+- Use `execute_read_primary` (not `execute_read`) right after a write that the
+  same request re-reads — replica lag can otherwise return a stale / not-found row.
 
 ---
 

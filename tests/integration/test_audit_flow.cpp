@@ -44,7 +44,7 @@ protected:
         if (::testing::Test::IsSkipped())
             return;
         Database::get().execute_write([](auto& txn) {
-            txn.exec("TRUNCATE TABLE users");
+            txn.exec("TRUNCATE TABLE users CASCADE");
             txn.exec("TRUNCATE TABLE audit_log");
             return 0;
         });

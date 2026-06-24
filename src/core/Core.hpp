@@ -6,12 +6,14 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <unordered_set>
@@ -30,6 +32,7 @@
 #include "security/Auth.hpp"
 #include "security/Idempotency.hpp"
 #include "security/RateLimit.hpp"
+#include "storage/Storage.hpp"
 #include "tasks/Tasks.hpp"
 #include "utils/Config.hpp"
 #include "utils/Strings.hpp"
@@ -123,11 +126,13 @@ public:
             }
 
             init_cache_(cfg);
+            Storage::initialize(cfg);
             if (mode != InitMode::Worker) {
                 init_messaging_(cfg);
                 Tasks::initialize();
                 register_token_reaper_();
                 register_db_pool_metric_(cfg);
+                register_replication_lag_metric_(cfg);
             }
             init_security_();
             init_jobs_(cfg);
@@ -462,6 +467,41 @@ private:
                     size_family.Add({{"pool", "replica"}}).Set(static_cast<double>(db.replica_pool_size()));
                 }
             });
+    }
+
+    // Registers db_replica_lag_seconds — how far a read replica trails the
+    // primary, in seconds. A climbing value means read-after-write reads can
+    // serve stale rows (the "I just saved it but it's gone" ghost); alert on it.
+    // Only registered when replicas are configured — the primary has no replay
+    // timestamp (the query returns NULL there). The round-robin read lands on
+    // some replica each tick, so with several replicas the gauge reports
+    // whichever it hit; that's enough to catch a lagging fleet.
+    static void register_replication_lag_metric_(Config::AppConfig& cfg) {
+        if (!Observability::is_initialized() || !Tasks::is_initialized() || !Database::is_initialized())
+            return;
+        if (Database::get().replica_count() == 0)
+            return;
+        auto& family = Observability::get().metrics().create_gauge(
+            "db_replica_lag_seconds", "Read-replica replication lag behind the primary, in seconds");
+        int refresh_sec =
+            cfg.get<int>("database.replica_lag_metric_refresh_sec", "DB_REPLICA_LAG_METRIC_REFRESH_SEC", 15);
+        Tasks::schedule_recurring("db_replica_lag_refresh", std::chrono::seconds(refresh_sec), [&family] {
+            if (!Observability::is_initialized() || !Database::is_initialized())
+                return;
+            try {
+                auto lag = Database::get().execute_read([](auto& txn) -> std::optional<double> {
+                    auto r =
+                        txn.exec("SELECT EXTRACT(EPOCH FROM (now() - pg_last_xact_replay_timestamp()))::float8 AS lag");
+                    if (r.empty() || r[0]["lag"].is_null())
+                        return std::nullopt;  // landed on the primary / nothing replayed yet
+                    return r[0]["lag"].template as<double>();
+                });
+                if (lag)
+                    family.Add({}).Set(std::max(0.0, *lag));  // clamp tiny clock-skew negatives
+            } catch (const std::exception& e) {
+                spdlog::warn("db_replica_lag refresh failed: {}", e.what());
+            }
+        });
     }
 
     // Periodically prune expired single-use token nonces (used_tokens,

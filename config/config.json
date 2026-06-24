@@ -58,6 +58,13 @@
       ]
     }
   },
+  "storage": {
+    "backend": "${STORAGE_BACKEND:-local}",
+    "public_base_url": "${STORAGE_PUBLIC_BASE_URL:-}",
+    "local": {
+      "root": "${STORAGE_LOCAL_ROOT:-data/uploads}"
+    }
+  },
   "mail": {
     "enabled": "${MAIL_ENABLED:-false}",
     "via_jobs": "${MAIL_VIA_JOBS:-true}",

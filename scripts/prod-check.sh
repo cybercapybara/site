@@ -129,6 +129,14 @@ else
 fi
 
 echo
+# This gate only sees the JSON app-config. On Kubernetes the deploy-path env is
+# rendered by Helm, so a fail-open rate limiter / public auth.mode can hide in
+# the chart values where this check can't see it. `make helm-validate`
+# (scripts/check-helm-render.sh) renders the prod overlay and asserts those —
+# run BOTH before shipping.
+echo "NOTE: also run 'make helm-validate' — it checks the rendered Helm deploy-path"
+echo "      (rate-limit fail-open, auth mode/cookies, no committed secrets)."
+echo
 if [[ $FAILURES -gt 0 ]]; then
     printf '\e[1;31mprod-check FAILED: %d issue(s).\e[0m\n' "$FAILURES"
     exit 1

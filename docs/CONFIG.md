@@ -24,7 +24,7 @@ Set `CONFIG_FILE` to point at a different JSON file (e.g.
 |---|---|---|---|---|
 | `SERVER_HOST` | `server.host` | string | `0.0.0.0` | Listen address |
 | `SERVER_PORT` | `server.port` | int | `8080` | |
-| `SERVER_THREADS` | `server.threads` | int | `4` | Drogon event-loop threads |
+| `SERVER_THREADS` | `server.threads` | int | `0` (auto = #cores) | Drogon event-loop threads. Under the **synchronous** pqxx model the in-flight DB-call count is capped by THIS, not by `database.pool_size` — it's the real concurrency knob. `0`/unset auto-sizes to the CPU count; keep `database.pool_size` ≥ threads (the app warns at boot if not). |
 | `SERVER_MAX_BODY_BYTES` | `server.max_body_bytes` | int | `10485760` | 10 MB cap on request bodies — prevents memory blow-up from a single client. Bump for file uploads. |
 | `SERVER_SSL_ENABLED` | `server.ssl.enabled` | bool | `false` | Off by default — production terminates TLS at the ingress/reverse proxy (the Helm chart assumes this). Exposing the app directly (bare-metal, no proxy)? set `true` + cert/key, else traffic is plain HTTP. |
 | `SSL_CERT_FILE` | `server.ssl.cert` | string | — | PEM cert path when SSL on |
@@ -88,6 +88,17 @@ Set `CONFIG_FILE` to point at a different JSON file (e.g.
 | `DOCS_ENABLED` | `docs.enabled` | bool | `false` | Mount `/api/docs` + `/api/openapi.yaml` — dev only |
 | `DOCS_OPENAPI_PATH` | `docs.openapi_path` | string | `docs/openapi.yaml` | Path served at `/api/openapi.yaml` |
 
+## Object storage
+
+`Storage::get()` is a get/put/remove seam (`src/storage/Storage.hpp`). Only the
+`local` filesystem backend ships; swap in S3/GCS by subclassing `StorageBackend`.
+
+| Env | JSON key | Type | Default | Notes |
+|---|---|---|---|---|
+| `STORAGE_BACKEND` | `storage.backend` | string | `local` | Only `local` is built in; any other value fails fast at boot |
+| `STORAGE_LOCAL_ROOT` | `storage.local.root` | string | `data/uploads` | Directory the local backend writes objects under (gitignored) |
+| `STORAGE_PUBLIC_BASE_URL` | `storage.public_base_url` | string | — | Prepended to a key by `url()` (e.g. a CDN base); empty → returns the bare key |
+
 ## Observability
 
 | Env | JSON key | Type | Default | Notes |
@@ -107,7 +118,7 @@ Set `CONFIG_FILE` to point at a different JSON file (e.g.
 |---|---|---|---|---|
 | `DATABASE_PRIMARY_URL` | `database.primary` | string | `postgresql://localhost:5432/appdb` | Connection string |
 | `DATABASE_REPLICA_URLS` | `database.replicas` | csv | — | Read replicas |
-| `DB_POOL_SIZE` | `database.pool_size` | int | `10` | |
+| `DB_POOL_SIZE` | `database.pool_size` | int | `10` | Per-pool connections (primary + each replica). Keep ≥ `server.threads`: a smaller pool makes IO threads queue on `acquire()`; a much larger pool leaves the extra connections inert (and the `db_pool` saturation gauge under-reports). |
 | `DB_ACQUIRE_TIMEOUT_MS` | `database.acquire_timeout_ms` | int | `5000` | |
 | `DB_STATEMENT_TIMEOUT_MS` | `database.statement_timeout_ms` | int | `30000` | Per-connection PostgreSQL `statement_timeout`. `0` disables. |
 | `DB_MIGRATIONS_ENABLED` | `database.migrations_enabled` | bool | `true` | Set `false` when init-container runs them |
@@ -166,6 +177,7 @@ For URL components: `REDIS_HOST`, `REDIS_PORT`.
 | `JOBS_RESULT_TTL` | `jobs.result_ttl` | int | `86400` |
 | `JOBS_MAX_RETRIES` | `jobs.max_retries` | int | `3` |
 | `JOBS_DLQ_METRIC_REFRESH_SEC` | `jobs.dlq_metric_refresh_sec` | int | `10` | Exports `jobs_dlq_depth{type="..."}` plus an aggregate `type="_total"` |
+| `DB_REPLICA_LAG_METRIC_REFRESH_SEC` | `database.replica_lag_metric_refresh_sec` | int | `15` | Refresh interval for the `db_replica_lag_seconds` gauge. Only registered when read replicas are configured (primary has no replay timestamp). |
 
 ## Mail (SMTP)
 
@@ -189,7 +201,7 @@ For URL components: `REDIS_HOST`, `REDIS_PORT`.
 | Env | JSON key | Type | Default |
 |---|---|---|---|
 | `WORKER_ID` | `worker.id` | string | `worker-1` |
-| `WORKER_TYPES` | `worker.types` | csv | `default` |
+| `WORKER_TYPES` | `worker.types` | csv | `default` | Queues the worker pulls from. MUST include `account_email`, `email.send`, and `webhook.deliver` or those jobs pile up undrained. |
 | `WORKER_CONCURRENCY` | `worker.concurrency` | int | `2` |
 | `WORKER_HEALTH_PORT` | `worker.health_port` | int | `9091` |
 | `WORKER_BRPOP_TIMEOUT` | `worker.brpop_timeout` | int | `5` |

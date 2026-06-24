@@ -29,9 +29,16 @@ namespace Domain {
  */
 namespace Permission {
 inline constexpr std::uint32_t kNone = 0x00;
-inline constexpr std::uint32_t kGeneral = 0x01;     // flask-base: GENERAL
-inline constexpr std::uint32_t kAuditRead = 0x02;   // read the audit trail (GET /api/admin/audit)
-inline constexpr std::uint32_t kAdminister = 0xff;  // flask-base: ADMINISTER (all bits)
+inline constexpr std::uint32_t kGeneral = 0x01;    // flask-base: GENERAL
+inline constexpr std::uint32_t kAuditRead = 0x02;  // read the audit trail (GET /api/admin/audit)
+// ADMINISTER is a DEDICATED sentinel bit, not 0xff "all bits": with the old
+// 0xff a role that merely accumulated the eight low feature bits would
+// ACCIDENTALLY satisfy is_admin (a privilege-escalation footgun). Bit 30
+// (0x40000000) is reserved for admin and is never used by a feature permission;
+// carve feature bits from the low range (0x04, 0x08, …). Bit 31 is avoided so
+// the value fits the signed INTEGER `permissions` column. Existing admin rows
+// (seeded as 0xff) are migrated in migrations/004_admin_permission_sentinel.sql.
+inline constexpr std::uint32_t kAdminister = 0x40000000;  // flask-base: ADMINISTER (dedicated bit)
 }  // namespace Permission
 
 /**

@@ -26,11 +26,13 @@ set -euo pipefail
 
 DRY_RUN=0
 FORCE=0
+NO_DEMO=0
 ARGS=()
 for arg in "$@"; do
     case "$arg" in
     --dry-run | -n) DRY_RUN=1 ;;
     --force | -f) FORCE=1 ;;
+    --no-demo) NO_DEMO=1 ;;
     --help | -h)
         cat <<USAGE
 Usage: $0 [--dry-run] [--force] <project-name> [registry] [domain]
@@ -40,6 +42,11 @@ Usage: $0 [--dry-run] [--force] <project-name> [registry] [domain]
   --force, -f     Run even if project.env shows the template has already been
                   initialised under a different name. Without this flag the
                   script asks for confirmation interactively.
+  --no-demo       Strip the pedagogical flask-base reference material a real
+                  fork doesn't ship: _reference/flask-base/ (~21 MB Python
+                  source) and docs/PATTERNS-FROM-FLASK-BASE.md. The C++ app —
+                  auth, User/Role/Audit, jobs — is NOT a demo and is kept. See
+                  REMOVING-THE-DEMO.md.
 
   domain          Your host/domain — replaces the author's tarassov.me in
                   badges / demo URLs / SECURITY.md (default: example.com).
@@ -236,6 +243,11 @@ if [[ $DRY_RUN -eq 1 ]]; then
         echo "==> Would rename helm/cpp-worker -> helm/${PROJECT_NAME}-worker"
     fi
     echo "==> Would write project.env (PROJECT_NAME=${PROJECT_NAME}, REGISTRY=${REGISTRY}, GHCR_ORG=${REGISTRY_ORG})"
+    if [[ $NO_DEMO -eq 1 ]]; then
+        for p in "_reference" "docs/PATTERNS-FROM-FLASK-BASE.md"; do
+            [[ -e "$ROOT/$p" ]] && echo "==> Would remove reference material: $p"
+        done
+    fi
     echo ""
     echo "DRY RUN complete. Re-run without --dry-run to apply."
     exit 0
@@ -275,6 +287,30 @@ echo ""
 # excluded so a fork named e.g. "cpp-api-gateway" doesn't trip it. Vendor /
 # build / generated dirs and this script itself (which necessarily contains the
 # tokens) are skipped. -I skips binaries (portable across GNU/BSD grep).
+# Strip the flask-base reference material (opt-in). It exists to teach the
+# parity mapping; a shipped fork doesn't need ~21 MB of Python or the pattern
+# doc. The actual app (auth/User/Role/Audit/jobs) is NOT touched.
+if [[ $NO_DEMO -eq 1 ]]; then
+    DEMO_PATHS=("_reference" "docs/PATTERNS-FROM-FLASK-BASE.md")
+    for p in "${DEMO_PATHS[@]}"; do
+        [[ -e "$ROOT/$p" ]] || continue
+        if [[ $DRY_RUN -eq 1 ]]; then
+            echo "==> [dry-run] would remove $p"
+        else
+            echo "==> Removing reference material: $p"
+            rm -rf "${ROOT:?}/$p"
+        fi
+    done
+    if [[ $DRY_RUN -eq 0 ]]; then
+        # Drop the now-dangling doc link so check-doc-links / readers don't trip.
+        grep -rIlZ "PATTERNS-FROM-FLASK-BASE" "$ROOT" \
+            --exclude-dir=.git --exclude-dir=_reference 2>/dev/null |
+            while IFS= read -r -d '' f; do
+                sed -i.bak '/PATTERNS-FROM-FLASK-BASE/d' "$f" && rm -f "$f.bak"
+            done || true
+    fi
+fi
+
 echo "==> Verifying rename completeness"
 LEFTOVER_RE='cpp-rapid-rest-template|cpp_api_template|cpp_api_bench|cpp_api_service|cpp_worker_service|cpp_producer|cpp-api-team|resert/cpp-rapid-rest|ghcr\.io/resert|tarassov\.me'
 leftovers="$(grep -rInE "$LEFTOVER_RE" . \

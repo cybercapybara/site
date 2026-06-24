@@ -49,7 +49,7 @@ describe('Permission bits mirror Domain::Permission (src/domain/Role.hpp)', () =
 
   it('Administer == kAdminister', () => {
     expect(Permission.Administer).toBe(cpp.Administer);
-    expect(Permission.Administer).toBe(0xff);
+    expect(Permission.Administer).toBe(0x40000000);
   });
 
   it('every C++ bit is mirrored on the TS side', () => {

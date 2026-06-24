@@ -17,8 +17,8 @@ export const PERMISSION_BITS: PermissionBit[] = [
   { bit: 0x01, label: 'General', hint: 'Baseline access for any signed-in user' },
   { bit: 0x02, label: 'Audit read', hint: 'Read the audit trail (GET /api/admin/audit)' },
   // Bits 0x04..0x80 are NOT carved out on the backend yet — only kGeneral
-  // (0x01), kAuditRead (0x02) and kAdminister (0xff) exist in
-  // Domain::Permission (src/domain/Role.hpp). Add a row here the moment you
+  // (0x01), kAuditRead (0x02) and kAdminister (0x40000000, a dedicated sentinel
+  // bit) exist in Domain::Permission (src/domain/Role.hpp). Add a row here the moment you
   // define a new kPermission bit there; do not expose checkboxes for bits the
   // backend can't authorise.
 ];
@@ -29,14 +29,19 @@ export const Permission = {
   General: 0x01,
   /** Read the audit trail — Domain::Permission::kAuditRead. */
   AuditRead: 0x02,
-  /** All bits — Domain::Permission::kAdminister. */
-  Administer: 0xff,
+  /** Dedicated admin sentinel bit — Domain::Permission::kAdminister. NOT 0xff:
+   *  a role that merely accumulates the low feature bits must not become admin. */
+  Administer: 0x40000000,
 } as const;
 
 /** True when the user's role carries ALL requested permission bits. */
 export function userCan(user: User | null | undefined, permission: number): boolean {
   if (!user || !user.role) return false;
-  return (user.role.permissions & permission) === permission;
+  const have = user.role.permissions;
+  // The admin sentinel satisfies every permission check — admins can do
+  // anything (mirrors C++ Security::Auth::current_user_can).
+  if ((have & Permission.Administer) === Permission.Administer) return true;
+  return (have & permission) === permission;
 }
 
 export function userIsAdmin(user: User | null | undefined): boolean {

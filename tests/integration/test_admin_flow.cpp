@@ -59,7 +59,7 @@ protected:
             return;
 
         Database::get().execute_write([](auto& txn) {
-            txn.exec("TRUNCATE TABLE users");
+            txn.exec("TRUNCATE TABLE users CASCADE");
             // Drop extra roles inserted by prior test bodies (e.g. "Editor")
             // so create() can re-add them. The two seed roles from migration
             // 001 (ON CONFLICT DO NOTHING) are kept stable.

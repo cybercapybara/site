@@ -12,6 +12,7 @@ question instead of grepping the tree.
 | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) | Pre-commit setup, dev workflow, commit-message convention, release flow |
 | [`../SECURITY.md`](../SECURITY.md) | Disclosure policy + production-hardening checklist |
 | [`../CHANGELOG.md`](../CHANGELOG.md) | Versioned change log (semver, edited under `## [Unreleased]`) |
+| [`../REMOVING-THE-DEMO.md`](../REMOVING-THE-DEMO.md) | What's reference-only (flask-base) vs the real app, and how to strip it (`init-project.sh --no-demo`) |
 
 ## Worked examples & deep-dives
 
@@ -85,6 +86,7 @@ question instead of grepping the tree.
 | `new-migration.sh` | Generate the next `NNN_<slug>.sql` |
 | `new-react-page.sh` | Scaffold a frontend admin page (hook + query keys + route) |
 | `check-openapi-drift.sh` | Verify `Api::get_endpoints()` (src/api/Endpoints.hpp) ↔ `docs/openapi.yaml` (method, path) |
+| `check-routes-registered.sh` | Verify every controller ADD_METHOD_TO route is in `Api::get_endpoints()` (symmetric to the OpenAPI drift check) |
 | `check-test-buckets.sh` | Verify test suites sit in the right bucket — classified by DIRECTORY, fails on a suite-name clash across unit/integration |
 | `prod-check.sh` | Pre-deploy assertions on a production config (auth, secrets, TLS, fail-closed) |
 | `lint-openapi.sh` | Spectral lint with project ruleset |

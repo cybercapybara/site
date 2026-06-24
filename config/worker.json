@@ -47,7 +47,9 @@
     "id": "worker-1",
     "types": [
       "default",
-      "account_email"
+      "account_email",
+      "email.send",
+      "webhook.deliver"
     ],
     "concurrency": 2,
     "health_port": 9091,

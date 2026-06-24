@@ -128,7 +128,11 @@ helm/values.*.yaml
 helm/*.local.yaml
 helm/values.secret.yaml
 # Per-environment / prod overlays carry real creds — never commit them.
+# The *.example.yaml templates ARE tracked (secret-free); copy one to
+# values-prod.yaml and fill it in. The negation keeps the example tracked even
+# if the glob above is ever broadened.
 helm/**/values-prod.yaml
+!helm/**/values-prod.example.yaml
 # Helm dependency build artifacts (regenerated via `helm dependency build`).
 helm/*/charts/
 # Auto-generated dev JWT secret for make up-everything
@@ -136,3 +140,6 @@ docker/.jwt-dev-secret
 
 # Demo env generated secrets (never commit)
 helm/cpp-env/.demo-secrets.env
+
+# Local file-storage backend (Storage::LocalStorage) — never commit uploads
+data/uploads/

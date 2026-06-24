@@ -6,6 +6,77 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-06-24
+
+Fork-readiness round: programmatic auth, outbound integrations, a storage seam,
+and a batch of security/scaffolding hardening ahead of building the first real
+project on the template.
+
+**Heads-up — admin permission model changed.** `Permission::kAdminister` moved
+from `0xff` to a dedicated sentinel bit (`0x40000000`). It is data-migrated
+automatically (migration 004 converts the seeded `Administrator` role), so no
+manual action is needed — but if you persisted the old `0xff` admin value
+anywhere outside the seeded role, run the same `UPDATE`. Everything else is
+additive: new config keys have defaults / env fallbacks, so existing configs
+load unchanged.
+
+### Added
+- **API keys / personal access tokens** for machine clients (migration 005).
+  `Security::ApiKeys::generate/authenticate`; presented via `X-API-Key` or a
+  `cpk_`-prefixed `Authorization` token; only the SHA-256 hash is stored.
+  Owner-scoped management at `POST/GET/DELETE /api/account/api-keys` (a user
+  only ever sees/revokes their own; the secret is shown exactly once).
+- **Outbound webhooks**: `Webhooks::send()` enqueues a signed (`X-Webhook-
+  Signature: sha256=…` HMAC) POST delivered by the worker with retry/backoff/DLQ.
+  Coarse SSRF guard refuses localhost / private / link-local / cloud-metadata
+  hosts and non-http(s) schemes; redirects disabled.
+- **Object/file storage seam**: `Storage::get()` (put/get/remove/exists/url)
+  with a `LocalStorage` disk backend and a path-traversal guard. Swap in S3/GCS
+  by subclassing `StorageBackend`. Config under `storage.*`.
+- **Generic transactional email**: `Email::SendEmail::send(to, subject, text,
+  html)` enqueues an `email.send` job for any ad-hoc mail (not just account
+  flows).
+- **Owner-scoped resources**: `new-resource.sh --owned` scaffolds an IDOR-safe
+  per-user resource (owner FK migration, `CrudBase::find_owned/list_owned/
+  count_owned`, `API_REQUIRE_OWNER`). The scaffolder also emits a no-infra
+  domain unit test alongside the integration test.
+- `Cache::cached<T>(key, ttl, loader)` read-through helper (fail-open).
+- **Replica-lag observability**: `db_replica_lag_seconds` gauge +
+  `CppApiHighReplicaLag` alert (only active when replicas are configured).
+- Tracked, secret-free `values-prod.example.yaml` for the api / worker /
+  frontend charts; `init-project.sh --no-demo` strips the flask-base reference
+  material; `REMOVING-THE-DEMO.md`.
+- CI gates: `CI_REQUIRE_INFRA` fails (vs skips) when integration infra is
+  absent; `check-routes-registered.sh` asserts every `ADD_METHOD_TO` is in the
+  endpoint registry; `check-helm-render.sh` asserts the prod overlay's security
+  floor (rate-limit fail-closed, JWT, secure cookies, no committed secrets).
+
+### Changed
+- **Admin is a dedicated sentinel bit, not `0xff`** — a role accumulating the
+  eight low feature bits can no longer accidentally become admin. `current_user_
+  can` (and the TS mirror) give the sentinel an explicit allow-everything bypass
+  so admins still pass feature gates. Migration 004 converts existing admin rows.
+- `server.threads` default is now `0` = auto (one IO thread per core); the app
+  warns at boot when `database.pool_size < threads` (the real DB-concurrency cap
+  is the thread count, not the pool).
+- Every container drops **all** Linux capabilities (`capabilities.drop: [ALL]`).
+- Worker queue-type defaults include `email.send` and `webhook.deliver`.
+- Docs reconciled with the CrudBase scaffolder (EXAMPLES / CONVENTIONS); the
+  inaccurate "multi-arch" GitLab-CI claim corrected with deploy-arch guidance;
+  `make warm-cache` falls back to the upstream GHCR cache and `make doctor`
+  probes Colima memory. `app_core` introduced as the single CMake dependency seam.
+
+### Fixed
+- **Failed login attempts are now audited** (`auth.login_failed` with the
+  attempted email + source IP) — brute-force was previously invisible.
+
+### Security
+- Privilege-escalation prevented via the admin sentinel bit (above).
+- API-key secrets hashed at rest; revocation is owner-scoped and returns 404 for
+  others' / missing keys (no enumeration oracle).
+- Webhook SSRF guard; storage path-traversal guard; containers drop all caps.
+- Prod overlay ships the rate limiter **fail-closed**, now CI-asserted.
+
 ## [1.2.0] — 2026-06-23
 
 Security hardening, saturation observability, and template/DX fixes. No

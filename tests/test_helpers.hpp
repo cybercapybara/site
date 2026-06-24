@@ -266,9 +266,12 @@ inline void remove_temp_config(const std::string& path = "test_temp_config.json"
 // ---------------------------------------------------------------------------
 
 /// Wipe the users table between tests. Requires Database to be initialized.
+/// CASCADE so tables with an FK to users (api_keys, and any owner-scoped
+/// resource a fork adds) are cleared too — plain TRUNCATE errors on a referenced
+/// table.
 inline void truncate_users() {
     Database::get().execute_write([](auto& txn) {
-        txn.exec("TRUNCATE TABLE users");
+        txn.exec("TRUNCATE TABLE users CASCADE");
         return 0;
     });
 }
@@ -368,7 +371,23 @@ protected:
     virtual void post_init() {}
 
     void SetUp() override {
-        if ((requires_postgres() && !is_postgres_available()) || !is_redis_available()) {
+        const bool pg_ok = !requires_postgres() || is_postgres_available();
+        const bool redis_ok = is_redis_available();
+        if (!pg_ok || !redis_ok) {
+            // Locally, skipping when infra is absent is convenient. In CI it is a
+            // trap: a mis-wired integration job (no Postgres/Redis service) would
+            // SKIP every suite and report all-green, silently disabling the whole
+            // integration safety net. Set CI_REQUIRE_INFRA=1 in CI so a missing
+            // dependency FAILS loudly instead.
+            const char* require_infra = std::getenv("CI_REQUIRE_INFRA");
+            const bool must_have_infra = require_infra != nullptr && std::string(require_infra) != "" &&
+                                         std::string(require_infra) != "0" && std::string(require_infra) != "false";
+            if (must_have_infra) {
+                FAIL() << "CI_REQUIRE_INFRA is set but test infra is unavailable (postgres_ok=" << pg_ok
+                       << ", redis_ok=" << redis_ok
+                       << "). This suite would have SKIPPED — failing instead so a mis-configured "
+                          "integration job can't report all-green.";
+            }
             GTEST_SKIP() << "Postgres or Redis not available";
         }
         // Defensive: if the previous suite died before its TearDown,

@@ -119,8 +119,11 @@ methodology and a results template.
   `terminationGracePeriodSeconds`, `ServiceMonitor`, opt-in `PrometheusRule`
   with baseline SLO alerts, opt-in `ExternalSecret` skeleton for Vault /
   AWS / GCP secret stores.
-- GitLab CI: multi-arch Docker build, unit + integration tests, Trivy image scan,
-  clang-format / cppcheck / clang-tidy lints, ASan + UBSan sanitizer build.
+- GitLab CI: **arm64** Docker build (the GitLab runner is arm64), unit +
+  integration tests, Trivy image scan, clang-format / cppcheck / clang-tidy
+  lints, ASan + UBSan sanitizer build. The GitHub `release.yml` job publishes
+  the **multi-arch** (amd64 + arm64) image on `v*` tags — see the arch note
+  under [Kubernetes](#kubernetes) before deploying to an amd64 cluster.
 - `CODEOWNERS`, `SECURITY.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, PR templates.
 - Production config profile (`config/config.production.json`) gated by
   `make prod-check` — auth on, cookies secure, limiter fail-closed, docs UI
@@ -186,9 +189,22 @@ methodology and a results template.
 
 ## Quick start
 
+**Prerequisites:** Docker + Docker Compose v2. On macOS the build runs in a
+Linux VM (Docker Desktop or Colima) — **give it ≥ 8 GiB of memory**. The first
+build compiles the C++ dependency set from source via vcpkg; under-provisioned
+VMs (the Colima default is 2 GiB) OOM the builder and surface it as a cryptic
+`EOF` / `rpc error: Unavailable`, which reads like a code bug but isn't. With
+Colima: `colima start --cpu 4 --memory 8`. Run `make doctor` to check the
+toolchain and the VM's memory, and `make warm-cache` to pull a prebuilt
+dependency layer (falls back to the upstream template cache) so the first build
+is minutes, not ~30.
+
 ```bash
 git clone https://gitlab.com/tarassov.me/cpp-rapid-rest-template.git my-service
 cd my-service
+
+make doctor        # verify Docker + VM memory before the first (cold) build
+make warm-cache    # optional: prime the vcpkg dependency layer (~30 min -> ~3)
 
 # Rename template identity (project name, image registry, helm charts, etc.)
 ./scripts/init-project.sh my-service docker.io/myorg
@@ -418,10 +434,37 @@ helm template api helm/cpp-api --set image.repository=my-registry/cpp-api
 helm template worker helm/cpp-worker --set image.repository=my-registry/cpp-api
 ```
 
-Per-cluster secrets and overrides go in untracked files — `helm/values.yaml`,
+**First prod deploy — start from the example overlays.** Each chart ships a
+tracked, secret-free `values-prod.example.yaml`. Copy it, fill in the TODOs
+(hosts, image, datastore endpoints), and deploy:
+
+```bash
+cp helm/cpp-api/values-prod.example.yaml helm/cpp-api/values-prod.yaml   # gitignored
+helm upgrade --install api ./helm/cpp-api -n prod -f helm/cpp-api/values-prod.yaml \
+  --set externalDatabase.password="$DB_PASSWORD" \
+  --set externalRedis.password="$REDIS_PASSWORD" \
+  --set auth.jwtSecret="$JWT_SECRET"
+# repeat for cpp-worker (its datastore/auth MUST match) and cpp-frontend
+```
+
+**Image architecture — match it to your nodes.** The GitLab pipeline builds and
+pushes an **arm64-only** image (its runner is arm64); only the GitHub
+`release.yml` tag job publishes a **multi-arch** (amd64 + arm64) manifest. If
+your cluster is amd64 (the example overlays' `nodeSelector` assumes it) you must
+deploy an amd64 image — pull from a multi-arch tag, or build for amd64 yourself:
+
+```bash
+docker buildx build --platform linux/amd64 --target runtime \
+  -t your-registry/your-project:$(git rev-parse --short HEAD)-amd64 --push .
+```
+
+A mismatch shows up as `exec format error` / `CrashLoopBackOff` on first roll-out.
+
+Per-cluster secrets and overrides go in untracked files — `helm/**/values-prod.yaml`,
 `helm/values.*.yaml`, and `helm/*.local.yaml` are all gitignored. Either pass
 real secrets via `--set` / a private values file, or wire `externalSecrets`
-to Vault / AWS Secrets Manager / etc.
+to Vault / AWS Secrets Manager / etc. **Never** put a real secret in a tracked
+`*.example.yaml`.
 
 Opt-ins you'll almost certainly want in prod:
 
