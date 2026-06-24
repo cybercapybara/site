@@ -44,6 +44,22 @@
         }                                            \
     } while (0)
 
+/// Bind the caller's user id (principal subject) into `var` (std::string) for
+/// owner-scoped resources, or reject with 401. Unlike API_REQUIRE_ADMIN this is
+/// NOT a no-op when auth is disabled: a per-user resource is meaningless without
+/// an identity, so owner-scoped endpoints genuinely require AUTH_MODE != none.
+/// Pass `var` as the owner_id to CrudBase find_owned/list_owned/count_owned.
+#define API_REQUIRE_OWNER(req, callback, var)              \
+    std::string var;                                       \
+    do {                                                   \
+        auto _owner_p = Security::Auth::principal_of(req); \
+        if (!_owner_p || _owner_p->subject.empty()) {      \
+            callback(ErrorResponse::unauthorized());       \
+            return;                                        \
+        }                                                  \
+        (var) = _owner_p->subject;                         \
+    } while (0)
+
 /// Reject with 403 unless the caller's email is confirmed (401 if anonymous).
 /// No-op when auth is disabled. The confirmed flag is minted into the access
 /// JWT but NOT enforced by default — gate your domain's confirmation-required
