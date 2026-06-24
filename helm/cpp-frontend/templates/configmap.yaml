@@ -35,7 +35,12 @@ data:
         location /api/ {
             proxy_pass http://{{ .Values.backend.service }}:{{ .Values.backend.port }};
             proxy_set_header Host              $host;
-            proxy_set_header X-Real-IP         $remote_addr;
+            # Pass through the X-Real-IP the ingress set (the REAL client) — NOT
+            # $remote_addr, which is this hop's peer (the ingress pod) and would
+            # clobber the client IP the backend audits. When there's no upstream
+            # header (reached directly, not via ingress) this is empty and nginx
+            # omits it, so the backend falls back to X-Forwarded-For / peer.
+            proxy_set_header X-Real-IP         $http_x_real_ip;
             proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
             proxy_http_version 1.1;
