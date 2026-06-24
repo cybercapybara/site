@@ -308,6 +308,25 @@ inline std::string client_ip(const drogon::HttpRequestPtr& req, bool trust_proxy
     return req->peerAddr().toIp();
 }
 
+// Convenience: resolve trust_proxy / trusted_proxy_count straight from app
+// config, so any caller (audit, request logging, …) gets the SAME trusted
+// client-IP logic as the limiter — even when rate limiting itself is disabled
+// (the limiter may not be initialized, but the config keys still apply). With
+// trust_proxy=false this returns peerAddr (the proxy hop) rather than a
+// spoofable, client-supplied X-Real-IP header.
+inline std::string client_ip(const drogon::HttpRequestPtr& req) {
+    bool trust_proxy = false;
+    int count = 1;
+    if (::Config::is_initialized()) {
+        auto& c = ::Config::get();
+        trust_proxy = c.get<bool>("rate_limit.trust_proxy", "RATE_LIMIT_TRUST_PROXY", false);
+        count = c.get<int>("rate_limit.trusted_proxy_count", "RATE_LIMIT_TRUSTED_PROXY_COUNT", 1);
+        if (count < 1)
+            count = 1;
+    }
+    return client_ip(req, trust_proxy, count);
+}
+
 inline std::string identity_for(const drogon::HttpRequestPtr& req, const Config& cfg) {
     const std::string ip = client_ip(req, cfg.trust_proxy, cfg.trusted_proxy_count);
     auto principal = Security::Auth::principal_of(req);

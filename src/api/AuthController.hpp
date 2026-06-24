@@ -35,6 +35,7 @@
 #include "security/Audit.hpp"
 #include "security/Auth.hpp"
 #include "security/Password.hpp"
+#include "security/RateLimit.hpp"
 #include "security/SessionStore.hpp"
 #include "security/Tokens.hpp"
 #include "utils/Config.hpp"
@@ -151,10 +152,10 @@ public:
             // Audit the failed attempt so brute-force / credential-stuffing is
             // visible in the trail (it wasn't before — only successful admin
             // actions were recorded). No actor (unauthenticated); the attempted
-            // email + source IP are the investigation handles.
-            std::string ip = req->getHeader("X-Real-IP");
-            if (ip.empty())
-                ip = req->peerAddr().toIp();
+            // email + source IP are the investigation handles. Use the shared
+            // trusted-IP resolver (honors rate_limit.trust_proxy) — NOT a raw
+            // X-Real-IP read, which is client-spoofable when not behind a proxy.
+            const std::string ip = Security::RateLimit::client_ip(req);
             Security::Audit::record(
                 /*actor_id=*/"", "auth.login_failed", "user", user ? user->id : "", {{"email", email}, {"ip", ip}});
             // Single message for missing-user + bad-password to defeat enumeration.
