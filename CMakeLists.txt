@@ -141,6 +141,27 @@ set(COMMON_LIBS
     Threads::Threads
 )
 
+# ── app_core ─────────────────────────────────────────────────────────────────
+# The single named seam every binary (server, worker, tests) builds against:
+# it carries the shared third-party deps + the src/generated include dirs, so a
+# new dependency is added in ONE place and every target picks it up.
+#
+# It is an INTERFACE library today because the application code is still
+# header-only/inline — there is nothing to compile ONCE yet. The next step
+# toward a true compiled core (faster incremental builds, the prerequisite the
+# deferred multi-arch/ASan matrices were waiting on) is to de-inline modules
+# into app_core's own sources (declaration in .hpp, definition in a .cpp added
+# here via target_sources), turning this into a STATIC library. That is a large,
+# mechanical, build-touching change across ~60 headers — kept as a deliberate
+# follow-up so it can't destabilise the build mid-stream; the HEAVY_PCH below
+# already absorbs most of the per-TU third-party parse cost in the meantime.
+add_library(app_core INTERFACE)
+target_link_libraries(app_core INTERFACE ${COMMON_LIBS})
+target_include_directories(app_core INTERFACE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}/generated
+)
+
 # Precompiled headers: the framework headers below dominate compile time in
 # a header-only codebase (every TU re-parses Drogon + pqxx + redis++ + json).
 # Worker/tests/e2e reuse the same PCH where flags allow.
@@ -160,14 +181,14 @@ set(HEAVY_PCH
 add_executable(${PROJECT_NAME}
     src/main.cpp
 )
-target_link_libraries(${PROJECT_NAME} PRIVATE ${COMMON_LIBS})
+target_link_libraries(${PROJECT_NAME} PRIVATE app_core)
 target_precompile_headers(${PROJECT_NAME} PRIVATE ${HEAVY_PCH})
 
 # Create worker executable
 add_executable(${PROJECT_NAME}_worker
     src/worker_main.cpp
 )
-target_link_libraries(${PROJECT_NAME}_worker PRIVATE ${COMMON_LIBS})
+target_link_libraries(${PROJECT_NAME}_worker PRIVATE app_core)
 target_precompile_headers(${PROJECT_NAME}_worker REUSE_FROM ${PROJECT_NAME})
 
 # Enable testing
@@ -199,7 +220,7 @@ if(UNIT_SOURCES)
     target_link_libraries(${PROJECT_NAME}_tests_unit PRIVATE
         GTest::gtest
         GTest::gmock
-        ${COMMON_LIBS}
+        app_core
     )
     target_include_directories(${PROJECT_NAME}_tests_unit PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -227,7 +248,7 @@ if(INTEGRATION_SOURCES)
     target_link_libraries(${PROJECT_NAME}_tests_integration PRIVATE
         GTest::gtest
         GTest::gmock
-        ${COMMON_LIBS}
+        app_core
     )
     target_include_directories(${PROJECT_NAME}_tests_integration PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -250,7 +271,7 @@ if(E2E_SOURCES)
     add_executable(${PROJECT_NAME}_e2e ${E2E_SOURCES})
     target_link_libraries(${PROJECT_NAME}_e2e PRIVATE
         GTest::gtest
-        ${COMMON_LIBS}
+        app_core
     )
     target_include_directories(${PROJECT_NAME}_e2e PRIVATE
         ${CMAKE_SOURCE_DIR}/src
