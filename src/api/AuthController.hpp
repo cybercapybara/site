@@ -32,6 +32,7 @@
 #include "email/AccountEmails.hpp"
 #include "repositories/RoleRepository.hpp"
 #include "repositories/UserRepository.hpp"
+#include "security/Audit.hpp"
 #include "security/Auth.hpp"
 #include "security/Password.hpp"
 #include "security/SessionStore.hpp"
@@ -147,6 +148,18 @@ public:
         const bool password_ok = Security::Password::verify(password, hash_to_check);
 
         if (!user || !user->password_hash || !password_ok) {
+            // Audit the failed attempt so brute-force / credential-stuffing is
+            // visible in the trail (it wasn't before — only successful admin
+            // actions were recorded). No actor (unauthenticated); the attempted
+            // email + source IP are the investigation handles.
+            std::string ip = req->getHeader("X-Real-IP");
+            if (ip.empty())
+                ip = req->peerAddr().toIp();
+            Security::Audit::record(/*actor_id=*/"",
+                                    "auth.login_failed",
+                                    "user",
+                                    user ? user->id : "",
+                                    {{"email", email}, {"ip", ip}});
             // Single message for missing-user + bad-password to defeat enumeration.
             callback(ErrorResponse::unauthorized("invalid_credentials", "Invalid email or password"));
             return;
