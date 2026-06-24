@@ -73,7 +73,7 @@ cpp-api:
   replicaCount: 1
   image:
     repository: resert/cpp-rapid-rest-template
-    tag: "v1.3.0"
+    tag: "v1.3.1"
     pullPolicy: Always
   nodeSelector:
     kubernetes.io/arch: amd64
@@ -133,7 +133,7 @@ cpp-worker:
   replicaCount: 1
   image:
     repository: resert/cpp-rapid-rest-template-worker
-    tag: "v1.3.0"
+    tag: "v1.3.1"
     pullPolicy: Always
   nodeSelector:
     kubernetes.io/arch: amd64
@@ -188,7 +188,7 @@ cpp-frontend:
   replicaCount: 1
   image:
     repository: resert/cpp-rapid-rest-template-frontend
-    tag: "v1.3.0"
+    tag: "v1.3.1"
     pullPolicy: Always
   nodeSelector:
     kubernetes.io/arch: amd64
