@@ -3,30 +3,57 @@
 # Scaffold a full CRUD domain resource end to end, following docs/CONVENTIONS.md:
 #   - src/domain/<Entity>.hpp            (struct + from_row + to_json)
 #   - src/repositories/<Entity>Repository.hpp  (typed exceptions + find/list/count/create/remove)
-#   - src/api/<Entity>sController.hpp     (list/create/get/delete, admin-gated, with_repo_errors)
+#   - src/api/<Entity>sController.hpp     (list/create/get/delete, with_repo_errors)
 #   - wires the #include into src/api/Api.hpp
 #   - adds the routes to Api::get_endpoints() in src/api/Endpoints.hpp
 #   - appends a path + schema block to docs/openapi.yaml
 #   - tests/integration/test_<entity>.cpp skeleton
 #
+# Two shapes:
+#   default   ADMIN-gated, global-scoped (admin sees/manages every row).
+#   --owned   PER-USER: rows carry owner_id (FK to users), the controller gates
+#             with API_REQUIRE_OWNER and scopes every repo call by the caller via
+#             CrudBase find_owned/list_owned/count_owned — so it is IDOR-safe by
+#             construction. Use this for anything a normal user owns.
+#
 # The generated code COMPILES as-is with a minimal {id, name, created_at}
 # shape — edit the three files to add your real columns (keep struct /
-# from_row / to_json / SQL in sync), then add the migration with
-# scripts/new-migration.sh and the bucket-filter entry (check-test-buckets.sh
-# tells you where).
+# from_row / to_json / SQL in sync).
 #
 # Usage:
-#   ./scripts/new-resource.sh <Entity>            # singular PascalCase, e.g. Product
-#   ./scripts/new-resource.sh Product
+#   ./scripts/new-resource.sh <Entity> [--owned]   # singular PascalCase
+#   ./scripts/new-resource.sh Product              # admin-gated, global
+#   ./scripts/new-resource.sh Note --owned         # per-user, owner-scoped
 #
 set -euo pipefail
 
-if [[ $# -ne 1 ]]; then
-    echo "Usage: $0 <Entity>   (singular PascalCase, e.g. Product)" >&2
+# --owned scaffolds a PER-USER resource: every row carries owner_id (FK to
+# users), the controller gates with API_REQUIRE_OWNER and scopes every repo
+# call by the caller, so one user can never touch another's rows. Without it
+# you get the default ADMIN-gated, global-scoped resource.
+OWNED=0
+ENTITY=""
+for arg in "$@"; do
+    case "$arg" in
+    --owned) OWNED=1 ;;
+    -*)
+        echo "ERROR: unknown flag '$arg'" >&2
+        exit 2
+        ;;
+    *)
+        if [[ -n "$ENTITY" ]]; then
+            echo "ERROR: unexpected extra argument '$arg'" >&2
+            exit 2
+        fi
+        ENTITY="$arg"
+        ;;
+    esac
+done
+
+if [[ -z "$ENTITY" ]]; then
+    echo "Usage: $0 <Entity> [--owned]   (singular PascalCase, e.g. Product)" >&2
     exit 2
 fi
-
-ENTITY="$1"
 if [[ ! "$ENTITY" =~ ^[A-Z][A-Za-z0-9]+$ ]]; then
     echo "ERROR: entity must be PascalCase (e.g. Product), got '$ENTITY'" >&2
     exit 2
@@ -54,6 +81,64 @@ for f in "$DOMAIN_FILE" "$REPO_FILE" "$CTRL_FILE"; do
     fi
 done
 
+# ── Per-resource fragments, toggled by --owned ───────────────────────────
+# Literal $1/$2 inside these values are NOT re-expanded by the <<EOF heredocs
+# (single expansion pass), so they pass through to the generated SQL verbatim.
+if [[ $OWNED -eq 1 ]]; then
+    DOC_GATING="Owner-scoped (per-user): every row is scoped to the authenticated caller"
+    OWNER_FIELD="    std::string owner_id;  // FK -> users.id (the authenticated caller)
+"
+    OWNER_FROMROW="        e.owner_id = row[\"owner_id\"].template as<std::string>();
+"
+    OWNER_TOJSON="        {\"owner_id\", e.owner_id},
+"
+    REPO_COLUMNS="id, owner_id, name, created_at"
+    REPO_KOWNER="    static constexpr const char* kOwnerColumn = \"owner_id\";
+"
+    REPO_CREATE_SIG="create(const std::string& name, const std::string& owner_id)"
+    REPO_CREATE_SQL="INSERT INTO ${PLURAL} (name, owner_id) VALUES (\$1, \$2) RETURNING "
+    REPO_CREATE_ARGS="name, owner_id"
+    REPO_REMOVE_SIG="remove(const std::string& id, const std::string& owner_id)"
+    REPO_REMOVE_SQL="DELETE FROM ${PLURAL} WHERE id = \$1 AND owner_id = \$2 RETURNING id"
+    REPO_REMOVE_ARGS="id, owner_id"
+    CTRL_GUARD="API_REQUIRE_OWNER(req, callback, owner);"
+    CTRL_LIST="repo.list_owned(owner, page.limit, page.offset)"
+    CTRL_COUNT="repo.count_owned(owner)"
+    CTRL_FIND="repo.find_owned(id, owner)"
+    CTRL_CREATE="repo.create(body[\"name\"].get<std::string>(), owner)"
+    CTRL_REMOVE="repo.remove(id, owner)"
+    TEST_CASE="ListRequiresOwner"
+    TEST_ASSERT="    // Owner-scoped: an unauthenticated request has no principal, so the guard
+    // rejects it with 401 — the proof the per-user gate is wired (no IDOR via a
+    // missing identity). Authenticate via TestHelpers to exercise the 200 path.
+    EXPECT_EQ(resp->statusCode(), k401Unauthorized);"
+else
+    DOC_GATING="Admin-gated"
+    OWNER_FIELD=""
+    OWNER_FROMROW=""
+    OWNER_TOJSON=""
+    REPO_COLUMNS="id, name, created_at"
+    REPO_KOWNER=""
+    REPO_CREATE_SIG="create(const std::string& name)"
+    REPO_CREATE_SQL="INSERT INTO ${PLURAL} (name) VALUES (\$1) RETURNING "
+    REPO_CREATE_ARGS="name"
+    REPO_REMOVE_SIG="remove(const std::string& id)"
+    REPO_REMOVE_SQL="DELETE FROM ${PLURAL} WHERE id = \$1 RETURNING id"
+    REPO_REMOVE_ARGS="id"
+    CTRL_GUARD="API_REQUIRE_ADMIN(req, callback);"
+    CTRL_LIST="repo.list(page.limit, page.offset)"
+    CTRL_COUNT="repo.count()"
+    CTRL_FIND="repo.find(id)"
+    CTRL_CREATE="repo.create(body[\"name\"].get<std::string>())"
+    CTRL_REMOVE="repo.remove(id)"
+    TEST_CASE="ListReturnsEnvelope"
+    TEST_ASSERT="    // With AUTH_MODE=none the admin guard is a no-op, so this reaches the handler.
+    EXPECT_EQ(resp->statusCode(), k200OK);
+    auto body = json::parse(std::string(resp->body()));
+    EXPECT_TRUE(body.contains(\"data\"));
+    EXPECT_TRUE(body.contains(\"total\"));"
+fi
+
 # ── 1. Domain DTO ───────────────────────────────────────────────────────
 cat >"$DOMAIN_FILE" <<EOF
 /**
@@ -77,14 +162,14 @@ namespace Domain {
 
 struct ${ENTITY} {
     std::string id;          // UUID v4 (text)
-    std::string name;        // TODO: replace with your real columns
+${OWNER_FIELD}    std::string name;        // TODO: replace with your real columns
     std::string created_at;
 
     template <typename Row>
     static ${ENTITY} from_row(const Row& row) {
         ${ENTITY} e;
         e.id = row["id"].template as<std::string>();
-        e.name = row["name"].template as<std::string>();
+${OWNER_FROMROW}        e.name = row["name"].template as<std::string>();
         e.created_at = row["created_at"].template as<std::string>();
         return e;
     }
@@ -93,7 +178,7 @@ struct ${ENTITY} {
 inline void to_json(nlohmann::json& j, const ${ENTITY}& e) {
     j = nlohmann::json{
         {"id", e.id},
-        {"name", e.name},
+${OWNER_TOJSON}        {"name", e.name},
         {"created_at", e.created_at},
     };
 }
@@ -139,16 +224,16 @@ public:
     // CrudBase supplies find(id) / list(limit, offset) / count() from these
     // four constants — only the bespoke writes below are hand-written.
     static constexpr const char* kTable = "${PLURAL}";
-    static constexpr const char* kColumns = "id, name, created_at";
+    static constexpr const char* kColumns = "${REPO_COLUMNS}";
     static constexpr const char* kIdColumn = "id";
     static constexpr const char* kOrderBy = "created_at DESC";
-
-    Domain::${ENTITY} create(const std::string& name) {
+${REPO_KOWNER}
+    Domain::${ENTITY} ${REPO_CREATE_SIG} {
         return detail::translate_sql(
             [&] {
                 return Database::get().execute_write([&](auto& txn) {
                     auto r = txn.exec_params(
-                        std::string("INSERT INTO ${PLURAL} (name) VALUES (\$1) RETURNING ") + kColumns, name);
+                        std::string("${REPO_CREATE_SQL}") + kColumns, ${REPO_CREATE_ARGS});
                     return Domain::${ENTITY}::from_row(r[0]);
                 });
             },
@@ -158,9 +243,9 @@ public:
             });
     }
 
-    void remove(const std::string& id) {
+    void ${REPO_REMOVE_SIG} {
         Database::get().execute_write([&](auto& txn) {
-            auto r = txn.exec_params("DELETE FROM ${PLURAL} WHERE id = \$1 RETURNING id", id);
+            auto r = txn.exec_params("${REPO_REMOVE_SQL}", ${REPO_REMOVE_ARGS});
             if (r.empty())
                 throw ${ENTITY}NotFound{};
             return 0;
@@ -177,7 +262,7 @@ cat >"$CTRL_FILE" <<EOF
 /**
  * @file ${CONTROLLER}.hpp
  * @brief ${ENTITY} CRUD endpoints. Generated by scripts/new-resource.sh.
- *        Admin-gated; follows docs/CONVENTIONS.md.
+ *        ${DOC_GATING}; follows docs/CONVENTIONS.md.
  */
 
 #pragma once
@@ -210,11 +295,11 @@ public:
     METHOD_LIST_END
 
     void list${ENTITY}s(const HttpRequestPtr& req, std::function<void(const HttpResponsePtr&)>&& callback) {
-        API_REQUIRE_ADMIN(req, callback);
+        ${CTRL_GUARD}
         const auto page = parse_page_params(req, /*default_limit=*/50, /*max_limit=*/200);
         Repositories::${ENTITY}Repository repo;
-        auto items = repo.list(page.limit, page.offset);
-        long total = repo.count();
+        auto items = ${CTRL_LIST};
+        long total = ${CTRL_COUNT};
         json data = json::array();
         for (const auto& e : items)
             data.push_back(e);
@@ -222,7 +307,7 @@ public:
     }
 
     void create${ENTITY}(const HttpRequestPtr& req, std::function<void(const HttpResponsePtr&)>&& callback) {
-        API_REQUIRE_ADMIN(req, callback);
+        ${CTRL_GUARD}
         json body;
         if (!Validation::parse_body(req, body, callback)) return;
         Validation::Errors errs;
@@ -234,7 +319,7 @@ public:
         }
         with_repo_errors(callback, "create${ENTITY}", [&] {
             Repositories::${ENTITY}Repository repo;
-            auto created = repo.create(body["name"].get<std::string>());
+            auto created = ${CTRL_CREATE};
             auto resp = Response::ok({{"data", json(created)}});
             resp->setStatusCode(k201Created);
             callback(resp);
@@ -244,13 +329,13 @@ public:
     void get${ENTITY}(const HttpRequestPtr& req,
                       std::function<void(const HttpResponsePtr&)>&& callback,
                       const std::string& id) {
-        API_REQUIRE_ADMIN(req, callback);
+        ${CTRL_GUARD}
         if (!is_valid_uuid(id)) {
             callback(ErrorResponse::bad_request("invalid_uuid", "UUID format is invalid"));
             return;
         }
         Repositories::${ENTITY}Repository repo;
-        auto found = repo.find(id);
+        auto found = ${CTRL_FIND};
         if (!found) {
             callback(ErrorResponse::not_found("${LOWER}"));
             return;
@@ -261,14 +346,14 @@ public:
     void delete${ENTITY}(const HttpRequestPtr& req,
                          std::function<void(const HttpResponsePtr&)>&& callback,
                          const std::string& id) {
-        API_REQUIRE_ADMIN(req, callback);
+        ${CTRL_GUARD}
         if (!is_valid_uuid(id)) {
             callback(ErrorResponse::bad_request("invalid_uuid", "UUID format is invalid"));
             return;
         }
         with_repo_errors(callback, "delete${ENTITY}", [&] {
             Repositories::${ENTITY}Repository repo;
-            repo.remove(id);
+            ${CTRL_REMOVE};
             callback(Response::ok({{"message", "${ENTITY} deleted"}}));
         });
     }
@@ -396,15 +481,11 @@ protected:
     }
 };
 
-TEST_F(${ENTITY}sFlowTest, ListReturnsEnvelope) {
+TEST_F(${ENTITY}sFlowTest, ${TEST_CASE}) {
     HttpResponsePtr resp;
     controller.list${ENTITY}s(TestHelpers::make_request(Get), [&](const HttpResponsePtr& r) { resp = r; });
     ASSERT_NE(resp, nullptr);
-    // With AUTH_MODE=none the admin guard is a no-op, so this reaches the handler.
-    EXPECT_EQ(resp->statusCode(), k200OK);
-    auto body = json::parse(std::string(resp->body()));
-    EXPECT_TRUE(body.contains("data"));
-    EXPECT_TRUE(body.contains("total"));
+${TEST_ASSERT}
 }
 
 }  // namespace
@@ -422,6 +503,16 @@ if grep -rqE "name[ '\"]*=*[ '\"]*${PLURAL}_table" "$ROOT/migrations" 2>/dev/nul
     echo "==> Migration for '${PLURAL}' already exists — skipping"
 else
     "$ROOT/scripts/new-migration.sh" "add_${PLURAL}_table" --table "${PLURAL}"
+    if [[ $OWNED -eq 1 ]]; then
+        # The repo/controller above scope by owner_id — make the schema match:
+        # inject the FK column (after id) and an index for the per-user lookups.
+        MIG_FILE="$(find "$ROOT/migrations" -maxdepth 1 -name "*_add_${PLURAL}_table.sql" | sort | tail -1)"
+        if [[ -n "$MIG_FILE" ]]; then
+            perl -i -pe 's/^(\s*id\s+UUID PRIMARY KEY DEFAULT gen_random_uuid\(\),)/$1\n    owner_id   UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,/' "$MIG_FILE"
+            printf '\nCREATE INDEX IF NOT EXISTS idx_%s_owner_id ON %s(owner_id);\n' "${PLURAL}" "${PLURAL}" >>"$MIG_FILE"
+            echo "==> --owned: added owner_id FK + index to $(basename "$MIG_FILE")"
+        fi
+    fi
 fi
 
 cat <<EOF
@@ -436,3 +527,12 @@ Done. Next steps (manual):
   3. Frontend: types via 'make frontend-gen-api', page under src/pages/admin/.
   4. Verify:  ./scripts/check-openapi-drift.sh  &&  make test
 EOF
+
+if [[ $OWNED -eq 1 ]]; then
+    cat <<EOF
+  --owned note: the table has a FK owner_id -> users(id) ON DELETE CASCADE.
+     Test fixtures that TRUNCATE users must use 'TRUNCATE users CASCADE' (or
+     truncate ${PLURAL} too) — a plain TRUNCATE of a referenced table errors.
+     Owner-scoped endpoints require AUTH_MODE != none (they need an identity).
+EOF
+fi
