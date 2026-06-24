@@ -6,6 +6,36 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.3.2] — 2026-06-24
+
+Frontend UX/accessibility overhaul (a multi-agent review of the SPA) plus
+real-client-IP plumbing fixes. No backend API changes.
+
+### Changed
+- **Frontend UX + a11y overhaul** (12 items): form errors no longer jolt the
+  layout — a new `FormAlert` renders an always-present, `aria-live` slot that
+  smoothly expands/collapses instead of inserting an Alert and shoving the
+  fields down (CLS), applied across all forms. Unknown routes now show a 404
+  page (was a silent redirect home). Nav gains an active-link indicator and a
+  mobile hamburger menu. Reset/change/request forms moved to the shared
+  `useApiMutation` (consistent pending/error handling). Admin forms use the
+  accessible `FormField`; destructive deletes use a focus-trapped
+  `ConfirmDialog` instead of native `confirm()`. DataTable shows skeleton rows
+  on first load; tables get `scope="col"`. Dark-mode-safe job badges, explicit
+  zod validation messages, responsive name grids, skip-to-content link, focus
+  rings, and aria-labels on icon buttons / pagination.
+- Audit detail now opens in a centered, focus-trapped modal (was appended at
+  the bottom of the page, past the table).
+
+### Fixed
+- **Real client IP through the frontend path**: the cpp-frontend nginx proxied
+  `/api` with `X-Real-IP $remote_addr`, clobbering the real client IP with the
+  ingress pod's internal address — requests via `app.<host>` audited a `10.x`
+  IP. It now passes the upstream `X-Real-IP` through.
+- Helm: `RATE_LIMIT_TRUST_PROXY` is always rendered (was gated on
+  `rateLimit.enabled`), so the audit honors `trust_proxy` even with rate
+  limiting off.
+
 ## [1.3.1] — 2026-06-24
 
 Patch release: trusted client-IP handling and two Helm deploy fixes.
