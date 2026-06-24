@@ -2,11 +2,11 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useNavigate } from 'react-router-dom';
 
+import { FormAlert } from '@/components/FormAlert';
+import { FormField } from '@/components/FormField';
 import { RoleSelect } from '@/components/RoleSelect';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useApiMutation } from '@/hooks/useApiMutation';
 import { api } from '@/lib/api/client';
@@ -54,33 +54,27 @@ export function AdminInviteUserPage() {
         </CardHeader>
         <CardContent>
           <form className="space-y-4" onSubmit={onSubmit}>
-            {invite.error && (
-              <Alert variant="destructive">
-                <AlertDescription>{invite.error}</AlertDescription>
-              </Alert>
-            )}
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" {...register('email')} />
-              {errors.email && (
-                <p className="text-sm text-destructive">{errors.email.message}</p>
-              )}
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label htmlFor="first_name">First name</Label>
-                <Input id="first_name" {...register('first_name')} />
-                {errors.first_name && (
-                  <p className="text-sm text-destructive">{errors.first_name.message}</p>
-                )}
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="last_name">Last name</Label>
-                <Input id="last_name" {...register('last_name')} />
-                {errors.last_name && (
-                  <p className="text-sm text-destructive">{errors.last_name.message}</p>
-                )}
-              </div>
+            <FormAlert message={invite.error} />
+            <FormField
+              id="email"
+              type="email"
+              label="Email"
+              error={errors.email?.message}
+              {...register('email')}
+            />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <FormField
+                id="first_name"
+                label="First name"
+                error={errors.first_name?.message}
+                {...register('first_name')}
+              />
+              <FormField
+                id="last_name"
+                label="Last name"
+                error={errors.last_name?.message}
+                {...register('last_name')}
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="role_id">Role</Label>

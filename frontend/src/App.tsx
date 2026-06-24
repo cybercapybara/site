@@ -1,7 +1,8 @@
-import { Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { Routes, Route, Outlet } from 'react-router-dom';
 
 import { Layout } from '@/components/Layout';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
+import { NotFoundPage } from '@/pages/NotFound';
 import { Permission } from '@/lib/auth/permissions';
 import { routes, type RouteEntry, type RouteGuard } from '@/routes/manifest';
 
@@ -72,7 +73,7 @@ export default function App() {
         {/* Admin — gated by Permission.Administer (0xff) */}
         <Route element={<RequireAdmin />}>{routesFor('admin').map(renderRoute)}</Route>
 
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>
   );

@@ -37,11 +37,11 @@ function resolveTraceUiUrl(): string {
 const TRACE_UI_URL = resolveTraceUiUrl();
 
 const STATUS_STYLES: Record<Job['status'], string> = {
-  pending: 'bg-yellow-100 text-yellow-800',
-  processing: 'bg-blue-100 text-blue-800',
-  completed: 'bg-green-100 text-green-800',
-  failed: 'bg-orange-100 text-orange-800',
-  dead: 'bg-red-100 text-red-800',
+  pending: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300',
+  processing: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',
+  completed: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
+  failed: 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300',
+  dead: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300',
 };
 
 function StatusBadge({ status }: { status: Job['status'] }) {

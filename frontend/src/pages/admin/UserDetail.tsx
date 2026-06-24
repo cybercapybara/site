@@ -1,11 +1,14 @@
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 
+import { useState } from 'react';
+
+import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { FormAlert } from '@/components/FormAlert';
+import { FormField } from '@/components/FormField';
 import { RoleSelect } from '@/components/RoleSelect';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useApiMutation } from '@/hooks/useApiMutation';
 import { useMe } from '@/hooks/useMe';
@@ -16,6 +19,7 @@ import type { UserDetailResponse } from '@/lib/api/types';
 export function AdminUserDetailPage() {
   const { id = '' } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [confirmDelete, setConfirmDelete] = useState(false);
   // Query-backed via the TanStack Query cache: the cache is empty for one
   // paint after a hard reload, which would briefly disable the
   // self-protection UI.
@@ -54,16 +58,10 @@ export function AdminUserDetailPage() {
           <Link to="/admin/users">← Back</Link>
         </Button>
       </div>
-      {error && (
-        <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
-      {update.isSuccess && !error && (
-        <Alert variant="success">
-          <AlertDescription>Changes saved.</AlertDescription>
-        </Alert>
-      )}
+      <FormAlert
+        message={error}
+        success={update.isSuccess ? 'Changes saved.' : undefined}
+      />
       <Card>
         <CardHeader>
           <CardTitle>Details</CardTitle>
@@ -87,19 +85,20 @@ export function AdminUserDetailPage() {
             }}
             className="space-y-3"
           >
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input id="email" name="email" defaultValue={user.email} />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label htmlFor="first_name">First name</Label>
-                <Input id="first_name" name="first_name" defaultValue={user.first_name ?? ''} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="last_name">Last name</Label>
-                <Input id="last_name" name="last_name" defaultValue={user.last_name ?? ''} />
-              </div>
+            <FormField id="email" name="email" label="Email" defaultValue={user.email} />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <FormField
+                id="first_name"
+                name="first_name"
+                label="First name"
+                defaultValue={user.first_name ?? ''}
+              />
+              <FormField
+                id="last_name"
+                name="last_name"
+                label="Last name"
+                defaultValue={user.last_name ?? ''}
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="role_id">Role</Label>
@@ -126,13 +125,7 @@ export function AdminUserDetailPage() {
           <CardTitle className="text-destructive">Danger zone</CardTitle>
         </CardHeader>
         <CardContent>
-          <Button
-            variant="destructive"
-            disabled={isSelf}
-            onClick={() => {
-              if (confirm(`Delete user ${user.email}? This cannot be undone.`)) remove.mutate();
-            }}
-          >
+          <Button variant="destructive" disabled={isSelf} onClick={() => setConfirmDelete(true)}>
             Delete user
           </Button>
           {isSelf && (
@@ -142,6 +135,17 @@ export function AdminUserDetailPage() {
           )}
         </CardContent>
       </Card>
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Delete user"
+          description={`Delete user ${user.email}? This cannot be undone.`}
+          confirmLabel="Delete user"
+          destructive
+          busy={remove.isPending}
+          onConfirm={() => remove.mutate()}
+          onClose={() => setConfirmDelete(false)}
+        />
+      )}
     </div>
   );
 }
