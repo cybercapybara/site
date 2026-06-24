@@ -189,7 +189,7 @@ For URL components: `REDIS_HOST`, `REDIS_PORT`.
 | Env | JSON key | Type | Default |
 |---|---|---|---|
 | `WORKER_ID` | `worker.id` | string | `worker-1` |
-| `WORKER_TYPES` | `worker.types` | csv | `default` | Queues the worker pulls from. MUST include `account_email` (transactional email) and `email.send` (generic ad-hoc email) or those jobs pile up undrained. |
+| `WORKER_TYPES` | `worker.types` | csv | `default` | Queues the worker pulls from. MUST include `account_email`, `email.send`, and `webhook.deliver` or those jobs pile up undrained. |
 | `WORKER_CONCURRENCY` | `worker.concurrency` | int | `2` |
 | `WORKER_HEALTH_PORT` | `worker.health_port` | int | `9091` |
 | `WORKER_BRPOP_TIMEOUT` | `worker.brpop_timeout` | int | `5` |
