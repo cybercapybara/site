@@ -18,6 +18,7 @@
 
 #include "cache/Cache.hpp"
 #include "email/AccountEmailWorker.hpp"
+#include "email/GenericEmail.hpp"
 #include "jobs/Jobs.hpp"
 #include "repositories/RoleRepository.hpp"
 #include "repositories/UserRepository.hpp"
@@ -55,8 +56,10 @@ protected:
         TestHelpers::CoreBackedTest::TearDown();
     }
 
-    /// Shared cleanup: blobs + queue/dlq/index keys for the email job type.
-    static void drain_queue() { TestHelpers::drain_jobs({Email::AccountEmails::kJobType}); }
+    /// Shared cleanup: blobs + queue/dlq/index keys for the email job types.
+    static void drain_queue() {
+        TestHelpers::drain_jobs({Email::AccountEmails::kJobType, Email::SendEmail::kJobType});
+    }
 
     Domain::User make_user(const std::string& email) {
         Repositories::RoleRepository roles;
@@ -139,6 +142,29 @@ TEST_F(EmailJobsTest, viaJobsFalseSendsInline) {
     // Inline path: nothing enqueued; delivery itself is the disabled
     // mailer's logged no-op.
     EXPECT_EQ(queue_depth(), 0);
+}
+
+TEST_F(EmailJobsTest, genericSendEmailEnqueuesWithPayload) {
+    Email::SendEmail::send("ad-hoc@example.com", "Hello", "plain body", "<b>html</b>");
+
+    auto& redis = Cache::get().get_client();
+    std::vector<std::string> ids;
+    redis.lrange(Jobs::queue_key(Email::SendEmail::kJobType), 0, -1, std::back_inserter(ids));
+    ASSERT_EQ(ids.size(), 1u);
+    auto job = Jobs::get().get_status(ids[0]);
+    ASSERT_TRUE(job.has_value());
+    EXPECT_EQ(job->type, Email::SendEmail::kJobType);
+    EXPECT_EQ(job->payload["to"], "ad-hoc@example.com");
+    EXPECT_EQ(job->payload["subject"], "Hello");
+    EXPECT_EQ(job->payload["text"], "plain body");
+    EXPECT_EQ(job->payload["html"], "<b>html</b>");
+}
+
+TEST_F(EmailJobsTest, genericSendEmailRejectsMissingFields) {
+    // Worker-side validation: no recipient, or no body, must throw so the job
+    // is retried/DLQ'd rather than silently "succeeding".
+    EXPECT_THROW(Email::SendEmail::process_job({{"subject", "x"}, {"text", "y"}}), std::exception);
+    EXPECT_THROW(Email::SendEmail::process_job({{"to", "x@example.com"}, {"subject", "x"}}), std::exception);
 }
 
 }  // namespace
