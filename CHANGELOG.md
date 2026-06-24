@@ -6,6 +6,24 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.3.1] — 2026-06-24
+
+Patch release: trusted client-IP handling and two Helm deploy fixes.
+
+### Fixed
+- **Audit honors `trust_proxy`**: the failed-login audit read `X-Real-IP`
+  directly (trusting a client-spoofable header even when not behind a proxy) and
+  diverged from the rate limiter. Added `RateLimit::client_ip(req)` — resolves
+  `rate_limit.trust_proxy` / `trusted_proxy_count` from config (works even when
+  rate limiting is disabled) and applies the same trusted-IP logic; the audit
+  now uses it. Capturing the *real* client IP still requires the edge to forward
+  it (PROXY protocol on the LB + ingress-nginx) and `trust_proxy=true`.
+- **Helm**: guard the cpp-api `mail-smtp-password` Secret against a nil `mail`
+  map, so `helm upgrade --reuse-values` (whose reused values omit the optional
+  mail block) no longer fails to render.
+- **Helm**: pin the cpp-env umbrella + demo image tags to the v-prefixed release
+  tag (`v1.3.x`); a bare `1.3.0` matched no published image.
+
 ## [1.3.0] — 2026-06-24
 
 Fork-readiness round: programmatic auth, outbound integrations, a storage seam,
