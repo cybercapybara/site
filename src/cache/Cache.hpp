@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 #include <sw/redis++/redis++.h>
 
@@ -475,6 +476,38 @@ inline void install_for_testing(std::unique_ptr<CacheManager> fake) {
 }
 inline void reset_for_testing() {
     global_cache.reset();
+}
+
+// ── Read-through (cache-aside) helper ─────────────────────────────────────────
+// Return the cached value for `key`, or call `loader`, cache its result for
+// `ttl_sec`, and return it. T must be nlohmann-serializable (to_json/from_json
+// via ADL — every Domain DTO already is). Centralizes the get→miss→load→set
+// dance so each call site (and each fork) doesn't hand-roll it differently.
+//
+// FAIL-OPEN by design: if the cache is uninitialized/down, or the cached blob is
+// unparseable (e.g. the DTO's shape changed across a deploy), fall through to
+// loader() and just skip caching — correctness never depends on Redis. Only
+// cache positive lookups here; callers that must cache "absent" should wrap T in
+// std::optional and let from_json handle null.
+template <typename T, typename Loader>
+T cached(const std::string& key, long ttl_sec, Loader&& loader) {
+    if (is_initialized()) {
+        try {
+            if (auto hit = get().get(key))
+                return nlohmann::json::parse(*hit).template get<T>();
+        } catch (const std::exception& e) {
+            spdlog::debug("cache: ignoring unusable entry for '{}' ({})", key, e.what());
+        }
+    }
+    T value = std::forward<Loader>(loader)();
+    if (is_initialized()) {
+        try {
+            get().set(key, nlohmann::json(value).dump(), ttl_sec);
+        } catch (const std::exception& e) {
+            spdlog::debug("cache: failed to store '{}' ({})", key, e.what());
+        }
+    }
+    return value;
 }
 
 }  // namespace Cache
