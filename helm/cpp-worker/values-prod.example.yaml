@@ -42,9 +42,9 @@ pdb:
 # ── Worker queues ──────────────────────────────────────────────
 worker:
   id: worker-1
-  # MUST include account_email — a worker that only drains "default" silently
-  # leaves all transactional email undrained.
-  types: "default,account_email"
+  # MUST include account_email + email.send — a worker that only drains "default"
+  # silently leaves all transactional email undrained.
+  types: "default,account_email,email.send"
   concurrency: 2
   healthPort: 9091
   brpopTimeout: 5
