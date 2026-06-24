@@ -350,6 +350,7 @@ lint:openapi-drift:
     - apk add --no-cache bash gawk
   script:
     - ./scripts/check-openapi-drift.sh
+    - ./scripts/check-routes-registered.sh
     - ./scripts/check-test-buckets.sh
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"

@@ -115,6 +115,8 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Check OpenAPI drift
         run: ./scripts/check-openapi-drift.sh
+      - name: Check routes registered
+        run: ./scripts/check-routes-registered.sh
       - name: Check test-bucket filter sync
         run: ./scripts/check-test-buckets.sh
 
