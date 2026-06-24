@@ -186,9 +186,22 @@ methodology and a results template.
 
 ## Quick start
 
+**Prerequisites:** Docker + Docker Compose v2. On macOS the build runs in a
+Linux VM (Docker Desktop or Colima) — **give it ≥ 8 GiB of memory**. The first
+build compiles the C++ dependency set from source via vcpkg; under-provisioned
+VMs (the Colima default is 2 GiB) OOM the builder and surface it as a cryptic
+`EOF` / `rpc error: Unavailable`, which reads like a code bug but isn't. With
+Colima: `colima start --cpu 4 --memory 8`. Run `make doctor` to check the
+toolchain and the VM's memory, and `make warm-cache` to pull a prebuilt
+dependency layer (falls back to the upstream template cache) so the first build
+is minutes, not ~30.
+
 ```bash
 git clone https://gitlab.com/tarassov.me/cpp-rapid-rest-template.git my-service
 cd my-service
+
+make doctor        # verify Docker + VM memory before the first (cold) build
+make warm-cache    # optional: prime the vcpkg dependency layer (~30 min -> ~3)
 
 # Rename template identity (project name, image registry, helm charts, etc.)
 ./scripts/init-project.sh my-service docker.io/myorg

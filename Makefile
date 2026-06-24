@@ -16,6 +16,9 @@ GIT_SHA   := $(shell git rev-parse --short HEAD)
 # Override via GHCR_ORG in project.env if your fork lives under a different org.
 GHCR_ORG  ?= resert
 GHCR_REPO := ghcr.io/$(GHCR_ORG)/$(PROJECT_NAME)
+# Canonical upstream template cache — a fresh fork's own GHCR is empty until its
+# CI runs, so `make warm-cache` falls back here to skip the first cold build.
+UPSTREAM_GHCR ?= ghcr.io/resert/cpp-rapid-rest-template
 
 # Prefer the Compose v2 plugin (`docker compose`) when present; fall back to
 # the standalone v1 binary. CI images ship only the plugin, older dev
@@ -223,12 +226,19 @@ tidy:              ## Run clang-tidy via the builder image (CI-parity)
 		$(IMAGE):$(GIT_SHA) -c "apt-get update -qq && apt-get install -y -qq clang-tidy \
 			&& run-clang-tidy -p build -quiet -header-filter='src/.*' src/"
 
-warm-cache:        ## Pull the CI-built builder image to skip the cold vcpkg build (~30 min -> ~3)
-	@echo "Pulling $(GHCR_REPO)/builder:cache ..."
-	@docker pull $(GHCR_REPO)/builder:cache 2>/dev/null \
-		&& docker tag $(GHCR_REPO)/builder:cache cpp-rapid-rest-template:builder-latest \
-		&& echo "==> Cache primed: subsequent make build / make test reuse the dependency layers." \
-		|| echo "==> No prebuilt builder at $(GHCR_REPO)/builder:cache — builds will compile deps from source."
+warm-cache:        ## Pull a CI-built builder image to skip the cold vcpkg build (~30 min -> ~3)
+	@# Try the fork's own GHCR first, then fall back to the upstream template
+	@# cache (a fresh fork's GHCR is empty until its first CI run). Same vcpkg
+	@# dependency layers, so either primes the build.
+	@for ref in $(GHCR_REPO)/builder:cache $(UPSTREAM_GHCR)/builder:cache ; do \
+		echo "Trying $$ref ..." ; \
+		if docker pull "$$ref" 2>/dev/null ; then \
+			docker tag "$$ref" cpp-rapid-rest-template:builder-latest ; \
+			echo "==> Cache primed from $$ref — make build / make test reuse the dependency layers." ; \
+			exit 0 ; \
+		fi ; \
+	done ; \
+	echo "==> No prebuilt builder cache (tried fork + upstream) — builds compile deps from source (~30 min cold; needs a Docker VM with >=8GiB, see 'make doctor')."
 
 build:             ## Rebuild app image only
 	$(COMPOSE) $(ENV) build app
@@ -359,6 +369,13 @@ health:             ## curl /healthz, /ready, and tease /metrics
 doctor:            ## Sanity-check the local toolchain
 	@printf 'docker:      ' ; command -v docker     >/dev/null && docker --version     || echo MISSING
 	@printf 'docker compose: ' ; (docker compose version 2>/dev/null || command -v docker-compose >/dev/null && docker-compose --version) || echo MISSING
+	@printf 'docker memory: ' ; mem=$$(docker info --format '{{.MemTotal}}' 2>/dev/null) ; \
+		if [ -n "$$mem" ] && [ "$$mem" -gt 0 ] 2>/dev/null ; then \
+			gib=$$(( mem / 1073741824 )) ; \
+			if [ "$$gib" -lt 6 ] ; then \
+				echo "$${gib}GiB — TOO LOW. The cold vcpkg build OOMs the buildkit VM and shows up as 'EOF' / 'rpc Unavailable' (looks like a code bug). Give the VM >=8GiB, e.g. 'colima stop && colima start --cpu 4 --memory 8', then 'make warm-cache'." ; \
+			else echo "$${gib}GiB OK" ; fi ; \
+		else echo "(docker not running)" ; fi
 	@printf 'cmake:       ' ; command -v cmake      >/dev/null && cmake --version | head -1 || echo MISSING
 	@printf 'ninja:       ' ; command -v ninja      >/dev/null && ninja --version           || echo MISSING
 	@printf 'g++:         ' ; command -v g++        >/dev/null && g++ --version | head -1   || echo "(optional, use Docker)"
