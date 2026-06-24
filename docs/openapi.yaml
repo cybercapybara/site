@@ -503,7 +503,7 @@ paths:
       tags: [account]
       security: [{ BearerAuth: [] }]
       responses:
-        '200': { description: Array of API key metadata under data[] }
+        '200': { description: "Array of API key metadata under data[]" }
         '401': { description: Not authenticated }
     post:
       summary: Create an API key — the secret is returned ONCE in this response

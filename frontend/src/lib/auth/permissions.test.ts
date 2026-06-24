@@ -15,25 +15,34 @@ function userWith(permissions: number): User {
 }
 
 describe('permission bitmask (mirror of Domain::Permission)', () => {
-  it('Administer is 0xff and every catalogue bit is within it', () => {
-    // Administer == all bits set, independent of which individual bits are
-    // carved out — so it's NOT the OR-fold of the (currently partial) catalogue.
-    expect(Permission.Administer).toBe(0xff);
+  it('Administer is a dedicated sentinel bit, disjoint from the feature bits', () => {
+    // A single reserved high bit — NOT 0xff. A role that merely accumulates the
+    // low feature bits must never become admin (the privilege-escalation footgun
+    // the sentinel fixes).
+    expect(Permission.Administer).toBe(0x40000000);
+    expect(Permission.Administer & (Permission.Administer - 1)).toBe(0); // exactly one bit
     for (const b of PERMISSION_BITS) {
-      expect(Permission.Administer & b.bit).toBe(b.bit);
+      expect(Permission.Administer & b.bit).toBe(0); // overlaps no feature bit
     }
   });
 
-  it('userCan requires ALL requested bits', () => {
+  it('userCan requires ALL requested bits (non-admin)', () => {
     expect(userCan(userWith(Permission.General), Permission.General)).toBe(true);
     expect(userCan(userWith(Permission.General), Permission.Administer)).toBe(false);
     expect(userCan(userWith(0x03), 0x02)).toBe(true);
     expect(userCan(userWith(0x03), 0x05)).toBe(false); // 0x04 missing
   });
 
-  it('userIsAdmin only for the full mask', () => {
-    expect(userIsAdmin(userWith(0xff))).toBe(true);
-    expect(userIsAdmin(userWith(0xfe))).toBe(false);
+  it('the admin sentinel satisfies every permission check', () => {
+    const admin = userWith(Permission.Administer);
+    expect(userIsAdmin(admin)).toBe(true);
+    expect(userCan(admin, Permission.AuditRead)).toBe(true); // admin bypass
+    expect(userCan(admin, 0x04)).toBe(true); // even a bit not in its own mask
+  });
+
+  it('userIsAdmin needs the sentinel bit, not accumulated low bits', () => {
+    expect(userIsAdmin(userWith(Permission.Administer))).toBe(true);
+    expect(userIsAdmin(userWith(0xff))).toBe(false); // all eight low bits ≠ admin
     expect(userIsAdmin(null)).toBe(false);
   });
 
