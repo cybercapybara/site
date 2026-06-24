@@ -72,4 +72,30 @@ workloads="$(printf '%s' "$MINIMAL" | yq 'select(.kind=="Deployment" or .kind=="
 printf '%s' "$workloads" | grep -qi kafka && fail "values-minimal still renders a Kafka workload"
 printf '%s' "$workloads" | grep -qi jaeger && fail "values-minimal still renders a Jaeger workload"
 
+# 7. Production security floor. prod-check.sh validates the JSON app-config, but
+#    the deploy-path env comes from Helm — so the rate limiter shipping fail-OPEN
+#    in prod (a Redis blip silently disables login throttling) was invisible to
+#    it. Render the cpp-api chart with the TRACKED prod example overlay and
+#    assert the security-critical env the cluster actually runs with.
+echo "==> helm template (cpp-api prod example) + security assertions"
+API_CHART="$ROOT/helm/cpp-api"
+PROD_RENDERED="$(helm template prod-smoke "$API_CHART" -f "$API_CHART/values-prod.example.yaml")"
+penv() {
+    printf '%s' "$PROD_RENDERED" |
+        yq "select(.kind==\"Deployment\") | .spec.template.spec.containers[0].env[] | select(.name==\"$1\") | .value"
+}
+
+[ "$(penv RATE_LIMIT_ENABLED)" = "true" ] || fail "prod overlay: RATE_LIMIT_ENABLED != true (login is unthrottled)"
+[ "$(penv RATE_LIMIT_FAIL_OPEN)" = "false" ] ||
+    fail "prod overlay: rate limiter is fail-OPEN — a Redis outage disables the brute-force throttle on login. Set rateLimit.failOpen=false."
+[ "$(penv AUTH_MODE)" = "jwt" ] || fail "prod overlay: AUTH_MODE != jwt (endpoints would be public)"
+[ "$(penv AUTH_COOKIE_SECURE)" = "true" ] || fail "prod overlay: AUTH_COOKIE_SECURE != true (__Host- cookies need Secure)"
+
+# No plaintext secret may be baked into a TRACKED overlay — DB password / JWT
+# secret must arrive via --set or external-secrets (rendered as secretKeyRef),
+# so their plain .value is empty here. A non-empty value = a committed secret.
+for s in DATABASE_PASSWORD JWT_SECRET; do
+    [ -z "$(penv "$s")" ] || fail "prod overlay: $s carries a plaintext value — pass it via --set / external-secrets, never a tracked overlay"
+done
+
 echo "==> helm-render: all assertions passed"
