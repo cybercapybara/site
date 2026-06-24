@@ -3,11 +3,13 @@
 --
 -- The Permission bitmask values match flask-base's `Permission` class:
 --   GENERAL     = 0x01
---   ADMINISTER  = 0xff   -- all bits set
+--   ADMINISTER  = dedicated sentinel bit (0x40000000) — see migration 004.
 --
--- Add new permissions by carving out unused bits (0x02, 0x04, 0x08, 0x10,
--- ...). Keep `ADMINISTER = 0xff` so role checks for "admin" automatically
--- include any new permission unless we explicitly carve it out.
+-- Add new permissions by carving out unused LOW bits (0x02, 0x04, 0x08, …).
+-- ADMINISTER is a RESERVED high bit, NOT 0xff "all bits": with 0xff a role that
+-- accumulated the low bits would accidentally become admin. (This file still
+-- seeds the admin role as 0xff below for history; migration 004 converts it to
+-- the sentinel — don't change the value here, migrations are immutable.)
 --
 -- NOTE: MigrationRunner wraps each file in ONE transaction (under an advisory
 -- lock) and records schema_migrations in that same transaction. Do NOT add
