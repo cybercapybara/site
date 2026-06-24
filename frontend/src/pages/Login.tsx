@@ -3,7 +3,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import type { z } from 'zod';
 
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { FormAlert } from '@/components/FormAlert';
 import { Button } from '@/components/ui/button';
 import { FormField } from '@/components/FormField';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -43,11 +43,7 @@ export function LoginPage() {
         </CardHeader>
         <CardContent>
           <form className="space-y-4" onSubmit={onSubmit}>
-            {login.error && (
-              <Alert variant="destructive">
-                <AlertDescription>{apiErrorMessage(login.error)}</AlertDescription>
-              </Alert>
-            )}
+            <FormAlert message={login.error ? apiErrorMessage(login.error) : undefined} />
             <FormField
               id="email"
               type="email"

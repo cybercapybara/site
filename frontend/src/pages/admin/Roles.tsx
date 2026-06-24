@@ -2,8 +2,9 @@ import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { Trash2, Pencil } from 'lucide-react';
 
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { DataTable, type Column } from '@/components/DataTable';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { FormAlert } from '@/components/FormAlert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -26,6 +27,7 @@ interface RoleFormState {
 export function AdminRolesPage() {
   const [editing, setEditing] = useState<Role | null>(null);
   const [creating, setCreating] = useState(false);
+  const [deleting, setDeleting] = useState<Role | null>(null);
 
   const rolesQ = useAdminRoles();
 
@@ -48,6 +50,7 @@ export function AdminRolesPage() {
 
   const remove = useApiMutation((id: number) => api.deleteJson(`/api/admin/roles/${id}`), {
     invalidate: [qk.admin.roles()],
+    onSuccess: () => setDeleting(null),
   });
 
   // Single error banner — whichever mutation last failed.
@@ -92,10 +95,10 @@ export function AdminRolesPage() {
             disabled={r.is_default}
             title={r.is_default ? 'Default role cannot be deleted' : ''}
             onClick={() => {
-              if (
-                confirm(`Delete role "${r.name}"? Users referencing it must be reassigned first.`)
-              )
-                remove.mutate(r.id);
+              create.clearError();
+              update.clearError();
+              remove.clearError();
+              setDeleting(r);
             }}
           >
             <Trash2 className="h-3.5 w-3.5 text-destructive" />
@@ -131,11 +134,7 @@ export function AdminRolesPage() {
         </div>
       </div>
 
-      {error && (
-        <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
+      <FormAlert message={error} />
 
       <Card>
         <CardHeader>
@@ -178,6 +177,17 @@ export function AdminRolesPage() {
           submitting={update.isPending}
           onSubmit={(form) => update.mutate({ id: editing.id, form })}
           onCancel={() => setEditing(null)}
+        />
+      )}
+      {deleting && (
+        <ConfirmDialog
+          title="Delete role"
+          description={`Delete role "${deleting.name}"? Users referencing it must be reassigned first.`}
+          confirmLabel="Delete role"
+          destructive
+          busy={remove.isPending}
+          onConfirm={() => remove.mutate(deleting.id)}
+          onClose={() => setDeleting(null)}
         />
       )}
     </div>

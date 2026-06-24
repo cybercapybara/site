@@ -1,40 +1,33 @@
-import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Link, useParams } from 'react-router-dom';
 import type { z } from 'zod';
 
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { FormAlert } from '@/components/FormAlert';
 import { Button } from '@/components/ui/button';
 import { FormField } from '@/components/FormField';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { api, apiErrorMessage } from '@/lib/api/client';
+import { useApiMutation } from '@/hooks/useApiMutation';
+import { api } from '@/lib/api/client';
 import { resetPasswordSchema } from '@/lib/schemas/auth';
 
 type FormValues = z.infer<typeof resetPasswordSchema>;
 
 export function ResetPasswordPage() {
   const { token = '' } = useParams<{ token: string }>();
-  const [done, setDone] = useState(false);
-  const [serverError, setServerError] = useState<string | null>(null);
   const {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({ resolver: zodResolver(resetPasswordSchema) });
 
-  const onSubmit = handleSubmit(async (values) => {
-    setServerError(null);
-    const { error } = await api.POST(
-      '/api/account/reset-password/' + encodeURIComponent(token),
-      { body: { new_password: values.new_password } },
-    );
-    if (error) {
-      setServerError(apiErrorMessage(error, 'This reset link is invalid or has expired.'));
-      return;
-    }
-    setDone(true);
-  });
+  const reset = useApiMutation((values: FormValues) =>
+    api.postJson('/api/account/reset-password/' + encodeURIComponent(token), {
+      body: { new_password: values.new_password },
+    }),
+  );
+
+  const onSubmit = handleSubmit((values) => reset.mutate(values));
 
   return (
     <div className="container mx-auto max-w-md py-12">
@@ -43,22 +36,16 @@ export function ResetPasswordPage() {
           <CardTitle>Set a new password</CardTitle>
         </CardHeader>
         <CardContent>
-          {done ? (
+          {reset.isSuccess ? (
             <div className="space-y-4">
-              <Alert variant="success">
-                <AlertDescription>Password updated. You can log in now.</AlertDescription>
-              </Alert>
+              <FormAlert success="Password updated. You can log in now." />
               <Button asChild className="w-full">
                 <Link to="/login">Continue to log in</Link>
               </Button>
             </div>
           ) : (
             <form className="space-y-4" onSubmit={onSubmit}>
-              {serverError && (
-                <Alert variant="destructive">
-                  <AlertDescription>{serverError}</AlertDescription>
-                </Alert>
-              )}
+              <FormAlert message={reset.error} />
               <FormField
                 id="new_password"
                 type="password"
@@ -73,7 +60,7 @@ export function ResetPasswordPage() {
                 error={errors.new_password_confirm?.message}
                 {...register('new_password_confirm')}
               />
-              <Button type="submit" className="w-full" disabled={isSubmitting}>
+              <Button type="submit" className="w-full" disabled={isSubmitting || reset.isPending}>
                 Update password
               </Button>
             </form>

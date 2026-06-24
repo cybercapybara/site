@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { Link, useParams } from 'react-router-dom';
 import type { z } from 'zod';
 
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { FormAlert } from '@/components/FormAlert';
 import { Button } from '@/components/ui/button';
 import { FormField } from '@/components/FormField';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -67,9 +67,7 @@ export function JoinFromInvitePage() {
         <CardContent>
           {done ? (
             <div className="space-y-4">
-              <Alert variant="success">
-                <AlertDescription>Account ready. You can log in now.</AlertDescription>
-              </Alert>
+              <FormAlert success="Account ready. You can log in now." />
               <Button asChild className="w-full">
                 <Link to="/login">Continue to log in</Link>
               </Button>
@@ -79,11 +77,7 @@ export function JoinFromInvitePage() {
               <p className="text-sm text-muted-foreground">
                 Accept your invitation by choosing a password for your new account.
               </p>
-              {serverError && (
-                <Alert variant="destructive">
-                  <AlertDescription>{serverError}</AlertDescription>
-                </Alert>
-              )}
+              <FormAlert message={serverError} />
               <FormField
                 id="new_password"
                 type="password"

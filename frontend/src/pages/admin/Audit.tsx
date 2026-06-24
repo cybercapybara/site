@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { DataTable, type Column } from '@/components/DataTable';
@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { useFocusTrap } from '@/hooks/useFocusTrap';
 import { usePagedQuery } from '@/hooks/usePagedQuery';
 import { api } from '@/lib/api/client';
 import { qk } from '@/lib/api/queryKeys';
@@ -222,29 +223,28 @@ export function AdminAuditPage() {
  * backdrop, the Close button, or Escape.
  */
 function AuditDetailModal({ entry, onClose }: { entry: AuditEntry; onClose: () => void }) {
-  useEffect(() => {
-    const onKey = (ev: KeyboardEvent) => {
-      if (ev.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  const ref = useFocusTrap<HTMLDivElement>(onClose);
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      role="dialog"
-      aria-modal="true"
       onClick={onClose}
     >
       <Card
-        className="max-h-[85vh] w-full max-w-lg overflow-auto"
+        ref={ref}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="audit-detail-title"
+        tabIndex={-1}
+        className="max-h-[85vh] w-full max-w-xs sm:max-w-lg overflow-auto"
         onClick={(ev) => ev.stopPropagation()}
       >
         <CardContent className="space-y-3 pt-6 text-sm">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="font-mono text-base">{entry.action}</p>
+              <p id="audit-detail-title" className="font-mono text-base">
+                {entry.action}
+              </p>
               <p className="text-muted-foreground">
                 {formatTimestamp(entry.created_at)} · {entry.target_type}
                 {entry.target_id ? ` ${entry.target_id}` : ''}

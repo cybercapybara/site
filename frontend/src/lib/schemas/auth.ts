@@ -28,12 +28,15 @@ export const registerSchema = z
   });
 
 export const requestResetSchema = z.object({
-  email: z.string().min(1).email(),
+  email: z.string().min(1, 'Email is required').email('Invalid email'),
 });
 
 export const resetPasswordSchema = z
   .object({
-    new_password: z.string().min(8).max(128),
+    new_password: z
+      .string()
+      .min(8, 'Password must be at least 8 characters')
+      .max(128, 'Password is too long'),
     new_password_confirm: z.string(),
   })
   .refine((d) => d.new_password === d.new_password_confirm, {
@@ -43,8 +46,11 @@ export const resetPasswordSchema = z
 
 export const changePasswordSchema = z
   .object({
-    old_password: z.string().min(1),
-    new_password: z.string().min(8).max(128),
+    old_password: z.string().min(1, 'Current password is required'),
+    new_password: z
+      .string()
+      .min(8, 'Password must be at least 8 characters')
+      .max(128, 'Password is too long'),
     new_password_confirm: z.string(),
   })
   .refine((d) => d.new_password === d.new_password_confirm, {
@@ -53,6 +59,6 @@ export const changePasswordSchema = z
   });
 
 export const changeEmailSchema = z.object({
-  new_email: z.string().min(1).email(),
-  password: z.string().min(1),
+  new_email: z.string().min(1, 'Email is required').email('Invalid email'),
+  password: z.string().min(1, 'Password is required'),
 });

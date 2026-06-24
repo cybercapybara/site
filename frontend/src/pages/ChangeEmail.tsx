@@ -1,35 +1,30 @@
-import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { z } from 'zod';
 
+import { FormAlert } from '@/components/FormAlert';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { FormField } from '@/components/FormField';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { api, apiErrorMessage } from '@/lib/api/client';
+import { useApiMutation } from '@/hooks/useApiMutation';
+import { api } from '@/lib/api/client';
 import { changeEmailSchema } from '@/lib/schemas/auth';
 
 type FormValues = z.infer<typeof changeEmailSchema>;
 
 export function ChangeEmailPage() {
-  const [sent, setSent] = useState(false);
-  const [serverError, setServerError] = useState<string | null>(null);
   const {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({ resolver: zodResolver(changeEmailSchema) });
 
-  const onSubmit = handleSubmit(async (values) => {
-    setServerError(null);
-    const { error } = await api.POST('/api/account/change-email-request', { body: values });
-    if (error) {
-      setServerError(apiErrorMessage(error));
-      return;
-    }
-    setSent(true);
-  });
+  const change = useApiMutation((values: FormValues) =>
+    api.postJson('/api/account/change-email-request', { body: values }),
+  );
+
+  const onSubmit = handleSubmit((values) => change.mutate(values));
 
   return (
     <div className="container mx-auto max-w-md py-12">
@@ -42,7 +37,7 @@ export function ChangeEmailPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {sent ? (
+          {change.isSuccess ? (
             <Alert variant="success">
               <AlertDescription>
                 Confirmation email queued. Check the new address for a link.
@@ -50,11 +45,7 @@ export function ChangeEmailPage() {
             </Alert>
           ) : (
             <form className="space-y-4" onSubmit={onSubmit}>
-              {serverError && (
-                <Alert variant="destructive">
-                  <AlertDescription>{serverError}</AlertDescription>
-                </Alert>
-              )}
+              <FormAlert message={change.error} />
               <FormField
                 id="new_email"
                 type="email"
@@ -69,7 +60,7 @@ export function ChangeEmailPage() {
                 error={errors.password?.message}
                 {...register('password')}
               />
-              <Button type="submit" className="w-full" disabled={isSubmitting}>
+              <Button type="submit" className="w-full" disabled={isSubmitting || change.isPending}>
                 Send confirmation link
               </Button>
             </form>

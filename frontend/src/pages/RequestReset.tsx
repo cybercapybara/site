@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Link } from 'react-router-dom';
@@ -8,25 +7,28 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { FormField } from '@/components/FormField';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { useApiMutation } from '@/hooks/useApiMutation';
 import { api } from '@/lib/api/client';
 import { requestResetSchema } from '@/lib/schemas/auth';
 
 type FormValues = z.infer<typeof requestResetSchema>;
 
 export function RequestResetPage() {
-  const [sent, setSent] = useState(false);
   const {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({ resolver: zodResolver(requestResetSchema) });
 
-  const onSubmit = handleSubmit(async (values) => {
-    // The backend always returns 200 (no enumeration). We surface a
-    // generic confirmation either way so the UI matches.
-    await api.POST('/api/account/reset-password-request', { body: values });
-    setSent(true);
-  });
+  // The backend always returns 200 (no enumeration). We surface a generic
+  // confirmation once the request has settled — success or failure — so the
+  // UI never reveals whether the address is registered.
+  const request = useApiMutation((values: FormValues) =>
+    api.postJson('/api/account/reset-password-request', { body: values }),
+  );
+  const sent = request.isSuccess || request.isError;
+
+  const onSubmit = handleSubmit((values) => request.mutate(values));
 
   return (
     <div className="container mx-auto max-w-md py-12">
@@ -51,7 +53,7 @@ export function RequestResetPage() {
                 error={errors.email?.message}
                 {...register('email')}
               />
-              <Button type="submit" className="w-full" disabled={isSubmitting}>
+              <Button type="submit" className="w-full" disabled={isSubmitting || request.isPending}>
                 Send reset link
               </Button>
               <div className="text-sm text-muted-foreground text-center">

@@ -28,6 +28,7 @@ export function PaginationFooter({
         <Button
           variant="outline"
           size="sm"
+          aria-label="Previous page"
           disabled={page <= 1}
           onClick={() => onPageChange(page - 1)}
         >
@@ -36,6 +37,7 @@ export function PaginationFooter({
         <Button
           variant="outline"
           size="sm"
+          aria-label="Next page"
           disabled={page >= totalPages || isPlaceholderData}
           onClick={() => onPageChange(page + 1)}
         >

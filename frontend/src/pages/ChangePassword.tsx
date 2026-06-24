@@ -1,20 +1,18 @@
-import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { z } from 'zod';
 
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { FormAlert } from '@/components/FormAlert';
 import { Button } from '@/components/ui/button';
 import { FormField } from '@/components/FormField';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { api, apiErrorMessage } from '@/lib/api/client';
+import { useApiMutation } from '@/hooks/useApiMutation';
+import { api } from '@/lib/api/client';
 import { changePasswordSchema } from '@/lib/schemas/auth';
 
 type FormValues = z.infer<typeof changePasswordSchema>;
 
 export function ChangePasswordPage() {
-  const [done, setDone] = useState(false);
-  const [serverError, setServerError] = useState<string | null>(null);
   const {
     register,
     handleSubmit,
@@ -22,21 +20,18 @@ export function ChangePasswordPage() {
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({ resolver: zodResolver(changePasswordSchema) });
 
-  const onSubmit = handleSubmit(async (values) => {
-    setServerError(null);
-    const { error } = await api.POST('/api/account/change-password', {
-      body: {
-        old_password: values.old_password,
-        new_password: values.new_password,
-      },
-    });
-    if (error) {
-      setServerError(apiErrorMessage(error));
-      return;
-    }
-    setDone(true);
-    reset();
-  });
+  const change = useApiMutation(
+    (values: FormValues) =>
+      api.postJson('/api/account/change-password', {
+        body: {
+          old_password: values.old_password,
+          new_password: values.new_password,
+        },
+      }),
+    { onSuccess: () => reset() },
+  );
+
+  const onSubmit = handleSubmit((values) => change.mutate(values));
 
   return (
     <div className="container mx-auto max-w-md py-12">
@@ -46,16 +41,10 @@ export function ChangePasswordPage() {
         </CardHeader>
         <CardContent>
           <form className="space-y-4" onSubmit={onSubmit}>
-            {done && (
-              <Alert variant="success">
-                <AlertDescription>Password updated.</AlertDescription>
-              </Alert>
-            )}
-            {serverError && (
-              <Alert variant="destructive">
-                <AlertDescription>{serverError}</AlertDescription>
-              </Alert>
-            )}
+            <FormAlert
+              message={change.error}
+              success={change.isSuccess ? 'Password updated.' : undefined}
+            />
             <FormField
               id="old_password"
               type="password"
@@ -77,7 +66,7 @@ export function ChangePasswordPage() {
               error={errors.new_password_confirm?.message}
               {...register('new_password_confirm')}
             />
-            <Button type="submit" className="w-full" disabled={isSubmitting}>
+            <Button type="submit" className="w-full" disabled={isSubmitting || change.isPending}>
               Update password
             </Button>
           </form>
