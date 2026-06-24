@@ -418,10 +418,24 @@ helm template api helm/cpp-api --set image.repository=my-registry/cpp-api
 helm template worker helm/cpp-worker --set image.repository=my-registry/cpp-api
 ```
 
-Per-cluster secrets and overrides go in untracked files — `helm/values.yaml`,
+**First prod deploy — start from the example overlays.** Each chart ships a
+tracked, secret-free `values-prod.example.yaml`. Copy it, fill in the TODOs
+(hosts, image, datastore endpoints), and deploy:
+
+```bash
+cp helm/cpp-api/values-prod.example.yaml helm/cpp-api/values-prod.yaml   # gitignored
+helm upgrade --install api ./helm/cpp-api -n prod -f helm/cpp-api/values-prod.yaml \
+  --set externalDatabase.password="$DB_PASSWORD" \
+  --set externalRedis.password="$REDIS_PASSWORD" \
+  --set auth.jwtSecret="$JWT_SECRET"
+# repeat for cpp-worker (its datastore/auth MUST match) and cpp-frontend
+```
+
+Per-cluster secrets and overrides go in untracked files — `helm/**/values-prod.yaml`,
 `helm/values.*.yaml`, and `helm/*.local.yaml` are all gitignored. Either pass
 real secrets via `--set` / a private values file, or wire `externalSecrets`
-to Vault / AWS Secrets Manager / etc.
+to Vault / AWS Secrets Manager / etc. **Never** put a real secret in a tracked
+`*.example.yaml`.
 
 Opt-ins you'll almost certainly want in prod:
 
