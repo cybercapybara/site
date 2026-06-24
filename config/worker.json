@@ -48,7 +48,8 @@
     "types": [
       "default",
       "account_email",
-      "email.send"
+      "email.send",
+      "webhook.deliver"
     ],
     "concurrency": 2,
     "health_port": 9091,
