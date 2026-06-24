@@ -166,6 +166,7 @@ For URL components: `REDIS_HOST`, `REDIS_PORT`.
 | `JOBS_RESULT_TTL` | `jobs.result_ttl` | int | `86400` |
 | `JOBS_MAX_RETRIES` | `jobs.max_retries` | int | `3` |
 | `JOBS_DLQ_METRIC_REFRESH_SEC` | `jobs.dlq_metric_refresh_sec` | int | `10` | Exports `jobs_dlq_depth{type="..."}` plus an aggregate `type="_total"` |
+| `DB_REPLICA_LAG_METRIC_REFRESH_SEC` | `database.replica_lag_metric_refresh_sec` | int | `15` | Refresh interval for the `db_replica_lag_seconds` gauge. Only registered when read replicas are configured (primary has no replay timestamp). |
 
 ## Mail (SMTP)
 
