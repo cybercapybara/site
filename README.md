@@ -119,8 +119,11 @@ methodology and a results template.
   `terminationGracePeriodSeconds`, `ServiceMonitor`, opt-in `PrometheusRule`
   with baseline SLO alerts, opt-in `ExternalSecret` skeleton for Vault /
   AWS / GCP secret stores.
-- GitLab CI: multi-arch Docker build, unit + integration tests, Trivy image scan,
-  clang-format / cppcheck / clang-tidy lints, ASan + UBSan sanitizer build.
+- GitLab CI: **arm64** Docker build (the GitLab runner is arm64), unit +
+  integration tests, Trivy image scan, clang-format / cppcheck / clang-tidy
+  lints, ASan + UBSan sanitizer build. The GitHub `release.yml` job publishes
+  the **multi-arch** (amd64 + arm64) image on `v*` tags — see the arch note
+  under [Kubernetes](#kubernetes) before deploying to an amd64 cluster.
 - `CODEOWNERS`, `SECURITY.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, PR templates.
 - Production config profile (`config/config.production.json`) gated by
   `make prod-check` — auth on, cookies secure, limiter fail-closed, docs UI
@@ -443,6 +446,19 @@ helm upgrade --install api ./helm/cpp-api -n prod -f helm/cpp-api/values-prod.ya
   --set auth.jwtSecret="$JWT_SECRET"
 # repeat for cpp-worker (its datastore/auth MUST match) and cpp-frontend
 ```
+
+**Image architecture — match it to your nodes.** The GitLab pipeline builds and
+pushes an **arm64-only** image (its runner is arm64); only the GitHub
+`release.yml` tag job publishes a **multi-arch** (amd64 + arm64) manifest. If
+your cluster is amd64 (the example overlays' `nodeSelector` assumes it) you must
+deploy an amd64 image — pull from a multi-arch tag, or build for amd64 yourself:
+
+```bash
+docker buildx build --platform linux/amd64 --target runtime \
+  -t your-registry/your-project:$(git rev-parse --short HEAD)-amd64 --push .
+```
+
+A mismatch shows up as `exec format error` / `CrashLoopBackOff` on first roll-out.
 
 Per-cluster secrets and overrides go in untracked files — `helm/**/values-prod.yaml`,
 `helm/values.*.yaml`, and `helm/*.local.yaml` are all gitignored. Either pass
