@@ -190,8 +190,9 @@ lint-openapi:      ## Run spectral lint over docs/openapi.yaml
 ci-local:          ## Reproduce CI locally: format check + drift + spectral + tidy + tests
 	@echo "==> [1/6] clang-format check"
 	@$(MAKE) --no-print-directory lint-format
-	@echo "==> [2/6] OpenAPI drift"
+	@echo "==> [2/6] OpenAPI drift + routes registered"
 	@./scripts/check-openapi-drift.sh
+	@./scripts/check-routes-registered.sh
 	@echo "==> [3/6] helm render validate"
 	@$(MAKE) --no-print-directory helm-validate
 	@echo "==> [4/6] spectral lint"
