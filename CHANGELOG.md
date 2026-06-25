@@ -6,6 +6,23 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.3.3] — 2026-06-25
+
+Frontend redesign + the real fix for notification layout shift.
+
+### Changed
+- **Dark-first "dev-tool" redesign**: zinc neutrals + a single indigo accent,
+  tighter radius/spacing, borders over shadows, driven by the `index.css`
+  design tokens. Dark is now the default theme (light still available via the
+  toggle). Polished Card / Nav / DataTable / job-status badges to match.
+
+### Fixed
+- **Notifications no longer shift the layout.** Server/form feedback (invalid
+  login, saved, etc.) now shows as a TOAST (`position: fixed`, out of document
+  flow) instead of an in-flow alert that pushed the form down. Field-level
+  validation stays inline. New `useToast` / `useErrorToast`; `FormAlert`
+  removed.
+
 ## [1.3.2] — 2026-06-24
 
 Frontend UX/accessibility overhaul (a multi-agent review of the SPA) plus
