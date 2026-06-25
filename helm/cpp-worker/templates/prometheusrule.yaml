@@ -1,0 +1,112 @@
+{{- /*
+  PrometheusRule — baseline alert set for the cpp-worker.
+  Requires prometheus-operator CRDs installed in the cluster.
+
+  Enabled by monitoring.alertsEnabled=true. Mirrors the cpp-api PrometheusRule
+  structure but focuses on worker-specific signals (queue backlog, DLQ, pool
+  saturation, target-down). Thresholds are independently tunable via
+  monitoring.thresholds so worker queues can have different SLOs than the API.
+*/}}
+{{- if .Values.monitoring.alertsEnabled }}
+{{- $selector := .Values.monitoring.targetSelector | default (printf "service=\"%s\"" (include "cpp-worker.fullname" .)) }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "cpp-worker.fullname" . }}
+  labels:
+    {{- include "cpp-worker.labels" . | nindent 4 }}
+    {{- with .Values.monitoring.alertLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: {{ include "cpp-worker.fullname" . }}.rules
+      interval: 30s
+      rules:
+        - alert: CppWorkerTargetDown
+          # Fires when the worker's metrics endpoint disappears for 2m.
+          # The worker exposes /metrics on metricsPort (9090); if Prometheus
+          # can't scrape it the pod is gone or crashed.
+          expr: |
+            up{ {{ $selector }} } == 0
+          for: 2m
+          labels:
+            severity: critical
+            service: {{ include "cpp-worker.fullname" . }}
+          annotations:
+            runbook_url: "https://gitlab.com/tarassov.me/cpp-rapid-rest-template/-/blob/master/docs/RUNBOOK.md#targetdown"
+            summary: "cpp-worker target is down"
+            description: "Prometheus cannot scrape {{ include "cpp-worker.fullname" . }} — the worker pod is gone or the metrics endpoint is unreachable. Jobs are piling up in the queue."
+
+        - alert: CppWorkerDbPoolSaturationHigh
+          # Fires when >90 % of DB connections are in use for 5 m.
+          # A busy worker can exhaust the pool if handlers issue many serial queries.
+          expr: |
+            (
+              sum by (pool) (db_pool_active_connections{ {{ $selector }} })
+              /
+              clamp_min(sum by (pool) (db_pool_size{ {{ $selector }} }), 1)
+            ) > {{ .Values.monitoring.thresholds.dbPoolSaturation | default 0.9 }}
+          for: 5m
+          labels:
+            severity: warning
+            service: {{ include "cpp-worker.fullname" . }}
+          annotations:
+            runbook_url: "https://gitlab.com/tarassov.me/cpp-rapid-rest-template/-/blob/master/docs/RUNBOOK.md#p99"
+            summary: "Worker DB connection pool >{{ mulf (.Values.monitoring.thresholds.dbPoolSaturation | default 0.9) 100.0 | int }}% saturated ({{`{{ $labels.pool }}`}} pool)"
+            description: "Increase externalDatabase.poolSize or reduce worker.concurrency to relieve connection pressure."
+
+        - alert: CppWorkerJobsQueueBacklog
+          # Fires when the total waiting-jobs queue (all types combined) stays
+          # above the threshold for 10 m — the leading signal that the worker
+          # fleet can't keep up with submission rate from the API.
+          expr: |
+            sum(jobs_queue_depth{ {{ $selector }}, type="_total"}) > {{ .Values.monitoring.thresholds.queueDepth | default 100 }}
+          for: 10m
+          labels:
+            severity: warning
+            service: {{ include "cpp-worker.fullname" . }}
+          annotations:
+            runbook_url: "https://gitlab.com/tarassov.me/cpp-rapid-rest-template/-/blob/master/docs/RUNBOOK.md#dlq"
+            summary: "Worker jobs queue backlog above {{ .Values.monitoring.thresholds.queueDepth | default 100 }}"
+            description: "Waiting-jobs queue is growing — scale the cpp-worker deployment (replicaCount / worker.concurrency) or investigate slow handlers."
+
+        - alert: CppWorkerJobsDlqGrowing
+          # Dead-letter queue accumulating means jobs are exhausting all retries.
+          # An operator must inspect the DLQ and decide whether to requeue or discard.
+          expr: |
+            sum(jobs_dlq_depth{ {{ $selector }}, type="_total"}) > {{ .Values.monitoring.thresholds.dlqDepth | default 10 }}
+          for: 10m
+          labels:
+            severity: warning
+            service: {{ include "cpp-worker.fullname" . }}
+          annotations:
+            runbook_url: "https://gitlab.com/tarassov.me/cpp-rapid-rest-template/-/blob/master/docs/RUNBOOK.md#dlq"
+            summary: "Worker dead-letter queue depth over threshold"
+            description: "Investigate repeatedly-failing jobs — inspect /api/jobs/dlq and decide whether to requeue or discard."
+
+        - alert: CppWorkerJobsDlqSpikeByType
+          # One specific job type is failing all retries and accumulating in DLQ.
+          expr: |
+            max by (type) (jobs_dlq_depth{ {{ $selector }}, type!="_total"}) > {{ .Values.monitoring.thresholds.dlqPerTypeDepth | default 5 }}
+          for: 10m
+          labels:
+            severity: warning
+            service: {{ include "cpp-worker.fullname" . }}
+          annotations:
+            runbook_url: "https://gitlab.com/tarassov.me/cpp-rapid-rest-template/-/blob/master/docs/RUNBOOK.md#dlq"
+            summary: "Worker DLQ growing for job type {{`{{ $labels.type }}`}}"
+            description: "A specific job type keeps exhausting retries — likely a bug in the handler or a chronically-bad input record."
+
+        - alert: CppWorkerRetriesExhaustedSpike
+          expr: |
+            sum(rate(retries_total{ {{ $selector }}, outcome="exhausted"}[5m])) > {{ .Values.monitoring.thresholds.retriesExhaustedPerSec | default 0.5 }}
+          for: 10m
+          labels:
+            severity: warning
+            service: {{ include "cpp-worker.fullname" . }}
+          annotations:
+            runbook_url: "https://gitlab.com/tarassov.me/cpp-rapid-rest-template/-/blob/master/docs/RUNBOOK.md#retries"
+            summary: "Worker retries frequently exhausted"
+            description: "Downstream is likely degraded — investigate database / cache / mail SMTP health."
+{{- end }}

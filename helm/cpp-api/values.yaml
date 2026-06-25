@@ -145,6 +145,8 @@ monitoring:
     errorRate: 0.01                 # Fraction of 5xx allowed (1 %)
     latencyP99Sec: 1                # p99 seconds
     dlqDepth: 10                    # total job_dlq_depth above this pages
+    queueDepth: 100                 # total jobs_queue_depth above this warns
+    dbPoolSaturation: 0.9           # db_pool_active/size ratio above this warns (90 %)
     replicaLagSec: 10               # read-replica lag (s) above this warns
     dlqPerTypeDepth: 5              # single-type DLQ depth that pages
     retriesExhaustedPerSec: 0.5     # sustained "gave up" retries per second
@@ -277,6 +279,7 @@ idempotency:
 logging:
   level: info              # trace | debug | info | warn | error | critical
   name: cpp_api            # Logger name (LOG_NAME)
+  format: json             # text | json (LOG_FORMAT) — json required for log aggregators
   serviceName: cpp_api_service  # OpenTelemetry service name (SERVICE_NAME)
 
 server:

@@ -141,6 +141,8 @@ spec:
               value: {{ .Values.logging.level | quote }}
             - name: LOG_NAME
               value: {{ .Values.logging.name | quote }}
+            - name: LOG_FORMAT
+              value: {{ .Values.logging.format | quote }}
             - name: SERVICE_NAME
               value: {{ .Values.logging.serviceName | quote }}
             # Tracing / OTLP
