@@ -21,6 +21,9 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: true,
+    // No sourcemaps in the production bundle — they'd publish readable
+    // source for the public fork. Dev/preview still get inline maps via
+    // Vite's defaults. Override with VITE_SOURCEMAP=1 for local debugging.
+    sourcemap: process.env.VITE_SOURCEMAP === '1',
   },
 });
