@@ -31,7 +31,7 @@ export function RequestResetPage() {
   const onSubmit = handleSubmit((values) => request.mutate(values));
 
   return (
-    <div className="container mx-auto max-w-md py-12">
+    <div className="container mx-auto max-w-md py-8">
       <Card>
         <CardHeader>
           <CardTitle>Reset your password</CardTitle>

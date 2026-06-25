@@ -8,7 +8,7 @@ export function ProfilePage() {
   const user = useMe().data ?? null;
   if (!user) return null;
   return (
-    <div className="container mx-auto max-w-2xl py-12 space-y-6">
+    <div className="container mx-auto max-w-2xl py-8 space-y-6">
       <Card>
         <CardHeader>
           <CardTitle>Your account</CardTitle>

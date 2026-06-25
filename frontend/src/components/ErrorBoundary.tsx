@@ -38,7 +38,7 @@ export class ErrorBoundary extends Component<Props, State> {
   render(): ReactNode {
     if (this.state.error) {
       return (
-        <div className="container mx-auto max-w-md py-12 space-y-4">
+        <div className="container mx-auto max-w-md py-8 space-y-4">
           <Alert variant="destructive">
             <AlertTitle>Something went wrong</AlertTitle>
             <AlertDescription>

@@ -2,7 +2,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 
 export function AboutPage() {
   return (
-    <div className="container mx-auto py-12 max-w-3xl">
+    <div className="container mx-auto py-8 max-w-3xl">
       <Card>
         <CardHeader>
           <CardTitle>About</CardTitle>

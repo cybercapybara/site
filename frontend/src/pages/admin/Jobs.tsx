@@ -5,12 +5,12 @@ import { RotateCcw } from 'lucide-react';
 
 import { DataTable, type Column } from '@/components/DataTable';
 import { PaginationFooter } from '@/components/PaginationFooter';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { usePagedQuery } from '@/hooks/usePagedQuery';
 import { useApiMutation } from '@/hooks/useApiMutation';
+import { useErrorToast } from '@/hooks/useErrorToast';
 import { api } from '@/lib/api/client';
 import { qk } from '@/lib/api/queryKeys';
 import type { DlqListResponse, Job } from '@/lib/api/types';
@@ -36,17 +36,25 @@ function resolveTraceUiUrl(): string {
 
 const TRACE_UI_URL = resolveTraceUiUrl();
 
+// Thin-bordered, low-chroma badges that read on both themes. Dark-first
+// (the app default), with a light-mode fallback that matches the palette.
 const STATUS_STYLES: Record<Job['status'], string> = {
-  pending: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300',
-  processing: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',
-  completed: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
-  failed: 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300',
-  dead: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300',
+  pending:
+    'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300',
+  processing:
+    'border-indigo-300 bg-indigo-50 text-indigo-700 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-300',
+  completed:
+    'border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300',
+  failed:
+    'border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-500/30 dark:bg-orange-500/10 dark:text-orange-300',
+  dead: 'border-red-300 bg-red-50 text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300',
 };
 
 function StatusBadge({ status }: { status: Job['status'] }) {
   return (
-    <span className={`rounded px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[status] ?? ''}`}>
+    <span
+      className={`inline-flex items-center rounded border px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[status] ?? ''}`}
+    >
       {status}
     </span>
   );
@@ -60,7 +68,7 @@ export function AdminJobsPage() {
   const [tab, setTab] = useState<'jobs' | 'dlq'>('jobs');
 
   return (
-    <div className="container mx-auto py-12 space-y-6">
+    <div className="container mx-auto py-8 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Jobs</h1>
         <Button asChild variant="ghost">
@@ -240,6 +248,7 @@ function DlqTab() {
     // requeue); also bump the jobs list since the job is back in flight.
     { invalidate: [qk.admin.jobsDlq(), qk.admin.jobs()] },
   );
+  useErrorToast(requeue.error);
 
   const columns: Column<Job>[] = [
     { header: 'ID', className: 'font-mono text-xs', cell: (j) => `${j.id.slice(0, 8)}…` },
@@ -273,11 +282,6 @@ function DlqTab() {
 
   return (
     <div className="space-y-4">
-      {requeue.error && (
-        <Alert variant="destructive">
-          <AlertDescription>{requeue.error}</AlertDescription>
-        </Alert>
-      )}
       <Card>
         <CardHeader>
           <CardTitle>{data ? `${data.depth} job(s) in DLQ` : 'Dead letter queue'}</CardTitle>

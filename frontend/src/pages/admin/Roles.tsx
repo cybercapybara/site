@@ -4,13 +4,13 @@ import { Trash2, Pencil } from 'lucide-react';
 
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { DataTable, type Column } from '@/components/DataTable';
-import { FormAlert } from '@/components/FormAlert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useAdminRoles } from '@/hooks/useAdminRoles';
 import { useApiMutation } from '@/hooks/useApiMutation';
+import { useErrorToast } from '@/hooks/useErrorToast';
 import { api } from '@/lib/api/client';
 import { qk } from '@/lib/api/queryKeys';
 import type { Role } from '@/lib/api/types';
@@ -53,8 +53,8 @@ export function AdminRolesPage() {
     onSuccess: () => setDeleting(null),
   });
 
-  // Single error banner — whichever mutation last failed.
-  const error = create.error ?? update.error ?? remove.error;
+  // Surface whichever mutation last failed as a toast (out of flow).
+  useErrorToast(create.error ?? update.error ?? remove.error);
 
   const columns: Column<Role>[] = [
     { header: 'Name', className: 'font-medium', cell: (r) => r.name },
@@ -77,16 +77,7 @@ export function AdminRolesPage() {
       className: 'text-right space-x-1',
       cell: (r) => (
         <>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => {
-              create.clearError();
-              update.clearError();
-              remove.clearError();
-              setEditing(r);
-            }}
-          >
+          <Button size="sm" variant="ghost" onClick={() => setEditing(r)}>
             <Pencil className="h-3.5 w-3.5" />
           </Button>
           <Button
@@ -94,12 +85,7 @@ export function AdminRolesPage() {
             variant="ghost"
             disabled={r.is_default}
             title={r.is_default ? 'Default role cannot be deleted' : ''}
-            onClick={() => {
-              create.clearError();
-              update.clearError();
-              remove.clearError();
-              setDeleting(r);
-            }}
+            onClick={() => setDeleting(r)}
           >
             <Trash2 className="h-3.5 w-3.5 text-destructive" />
           </Button>
@@ -109,7 +95,7 @@ export function AdminRolesPage() {
   ];
 
   return (
-    <div className="container mx-auto max-w-4xl py-12 space-y-6">
+    <div className="container mx-auto max-w-4xl py-8 space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Roles</h1>
@@ -121,20 +107,9 @@ export function AdminRolesPage() {
           <Button asChild variant="ghost">
             <Link to="/admin">← Admin</Link>
           </Button>
-          <Button
-            onClick={() => {
-              create.clearError();
-              update.clearError();
-              remove.clearError();
-              setCreating(true);
-            }}
-          >
-            New role
-          </Button>
+          <Button onClick={() => setCreating(true)}>New role</Button>
         </div>
       </div>
-
-      <FormAlert message={error} />
 
       <Card>
         <CardHeader>

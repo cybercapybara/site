@@ -4,10 +4,10 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { Link, useParams } from 'react-router-dom';
 import type { z } from 'zod';
 
-import { FormAlert } from '@/components/FormAlert';
 import { Button } from '@/components/ui/button';
 import { FormField } from '@/components/FormField';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useToast } from '@/components/ui/toaster';
 import { api, apiErrorMessage } from '@/lib/api/client';
 import { resetPasswordSchema } from '@/lib/schemas/auth';
 
@@ -40,8 +40,8 @@ export async function submitJoinFromInvite(
 
 export function JoinFromInvitePage() {
   const { token = '' } = useParams<{ token: string }>();
+  const toast = useToast();
   const [done, setDone] = useState(false);
-  const [serverError, setServerError] = useState<string | null>(null);
   const {
     register,
     handleSubmit,
@@ -49,17 +49,16 @@ export function JoinFromInvitePage() {
   } = useForm<FormValues>({ resolver: zodResolver(resetPasswordSchema) });
 
   const onSubmit = handleSubmit(async (values) => {
-    setServerError(null);
     const result = await submitJoinFromInvite(token, values.new_password);
     if (!result.ok) {
-      setServerError(result.error);
+      toast.error(result.error);
       return;
     }
     setDone(true);
   });
 
   return (
-    <div className="container mx-auto max-w-md py-12">
+    <div className="container mx-auto max-w-md py-8">
       <Card>
         <CardHeader>
           <CardTitle>Set your password</CardTitle>
@@ -67,7 +66,9 @@ export function JoinFromInvitePage() {
         <CardContent>
           {done ? (
             <div className="space-y-4">
-              <FormAlert success="Account ready. You can log in now." />
+              <p className="text-sm text-muted-foreground">
+                Account ready. You can log in now.
+              </p>
               <Button asChild className="w-full">
                 <Link to="/login">Continue to log in</Link>
               </Button>
@@ -77,7 +78,6 @@ export function JoinFromInvitePage() {
               <p className="text-sm text-muted-foreground">
                 Accept your invitation by choosing a password for your new account.
               </p>
-              <FormAlert message={serverError} />
               <FormField
                 id="new_password"
                 type="password"

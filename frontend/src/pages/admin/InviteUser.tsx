@@ -2,13 +2,13 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useNavigate } from 'react-router-dom';
 
-import { FormAlert } from '@/components/FormAlert';
 import { FormField } from '@/components/FormField';
 import { RoleSelect } from '@/components/RoleSelect';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { useApiMutation } from '@/hooks/useApiMutation';
+import { useErrorToast } from '@/hooks/useErrorToast';
 import { api } from '@/lib/api/client';
 import { qk } from '@/lib/api/queryKeys';
 import type { InviteResponse } from '@/lib/api/types';
@@ -40,11 +40,12 @@ export function AdminInviteUserPage() {
       onSuccess: () => navigate('/admin/users'),
     },
   );
+  useErrorToast(invite.error);
 
   const onSubmit = handleSubmit((values) => invite.mutate(values));
 
   return (
-    <div className="container mx-auto max-w-md py-12">
+    <div className="container mx-auto max-w-md py-8">
       <Card>
         <CardHeader>
           <CardTitle>Invite a user</CardTitle>
@@ -54,7 +55,6 @@ export function AdminInviteUserPage() {
         </CardHeader>
         <CardContent>
           <form className="space-y-4" onSubmit={onSubmit}>
-            <FormAlert message={invite.error} />
             <FormField
               id="email"
               type="email"

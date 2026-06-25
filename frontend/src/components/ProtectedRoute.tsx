@@ -79,13 +79,13 @@ export function ProtectedRoute({ children, requirePermission, requireConfirmed }
     case 'loading':
       // isPending = no data and no error yet. Distinct from isFetching,
       // which can flip true on background revalidations of cached data.
-      return <div className="container mx-auto py-12 text-muted-foreground">Loading…</div>;
+      return <div className="container mx-auto py-8 text-muted-foreground">Loading…</div>;
     case 'error':
       // A thrown error from useMe is a *real* failure (network / 5xx) — the
       // 401 "no session" case resolves to null instead. Don't bounce a
       // possibly-logged-in user to /login on a transient blip; let them retry.
       return (
-        <div className="container mx-auto max-w-md py-12 space-y-4">
+        <div className="container mx-auto max-w-md py-8 space-y-4">
           <Alert variant="destructive">
             <AlertDescription>
               {apiErrorMessage(me.error, 'Could not load your session.')}

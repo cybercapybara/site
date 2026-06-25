@@ -2,17 +2,19 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { z } from 'zod';
 
-import { FormAlert } from '@/components/FormAlert';
 import { Button } from '@/components/ui/button';
 import { FormField } from '@/components/FormField';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useToast } from '@/components/ui/toaster';
 import { useApiMutation } from '@/hooks/useApiMutation';
+import { useErrorToast } from '@/hooks/useErrorToast';
 import { api } from '@/lib/api/client';
 import { changePasswordSchema } from '@/lib/schemas/auth';
 
 type FormValues = z.infer<typeof changePasswordSchema>;
 
 export function ChangePasswordPage() {
+  const toast = useToast();
   const {
     register,
     handleSubmit,
@@ -28,23 +30,25 @@ export function ChangePasswordPage() {
           new_password: values.new_password,
         },
       }),
-    { onSuccess: () => reset() },
+    {
+      onSuccess: () => {
+        reset();
+        toast.success('Password updated.');
+      },
+    },
   );
+  useErrorToast(change.error);
 
   const onSubmit = handleSubmit((values) => change.mutate(values));
 
   return (
-    <div className="container mx-auto max-w-md py-12">
+    <div className="container mx-auto max-w-md py-8">
       <Card>
         <CardHeader>
           <CardTitle>Change password</CardTitle>
         </CardHeader>
         <CardContent>
           <form className="space-y-4" onSubmit={onSubmit}>
-            <FormAlert
-              message={change.error}
-              success={change.isSuccess ? 'Password updated.' : undefined}
-            />
             <FormField
               id="old_password"
               type="password"

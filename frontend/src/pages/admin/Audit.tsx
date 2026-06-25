@@ -109,7 +109,7 @@ export function AdminAuditPage() {
   }
 
   return (
-    <div className="container mx-auto py-12 space-y-6">
+    <div className="container mx-auto py-8 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Audit log</h1>
         <Button asChild variant="ghost">

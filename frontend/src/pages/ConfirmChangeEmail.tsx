@@ -27,7 +27,7 @@ export function ConfirmChangeEmailPage() {
   );
 
   return (
-    <div className="container mx-auto max-w-md py-12">
+    <div className="container mx-auto max-w-md py-8">
       <Card>
         <CardHeader>
           <CardTitle>Confirm your new email</CardTitle>

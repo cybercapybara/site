@@ -3,10 +3,10 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import type { z } from 'zod';
 
-import { FormAlert } from '@/components/FormAlert';
 import { Button } from '@/components/ui/button';
 import { FormField } from '@/components/FormField';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { useToast } from '@/components/ui/toaster';
 import { useLogin } from '@/hooks/useAuthMutations';
 import { apiErrorMessage } from '@/lib/api/client';
 import { loginSchema } from '@/lib/schemas/auth';
@@ -18,6 +18,7 @@ export function LoginPage() {
   const location = useLocation();
   const next = (location.state as { from?: string } | null)?.from ?? '/';
 
+  const toast = useToast();
   const login = useLogin();
   const {
     register,
@@ -29,13 +30,13 @@ export function LoginPage() {
     try {
       await login.mutateAsync(values);
       navigate(next, { replace: true });
-    } catch {
-      // error surfaces via login.error below
+    } catch (e) {
+      toast.error(apiErrorMessage(e));
     }
   });
 
   return (
-    <div className="container mx-auto max-w-md py-12">
+    <div className="container mx-auto max-w-md py-8">
       <Card>
         <CardHeader>
           <CardTitle>Log in</CardTitle>
@@ -43,7 +44,6 @@ export function LoginPage() {
         </CardHeader>
         <CardContent>
           <form className="space-y-4" onSubmit={onSubmit}>
-            <FormAlert message={login.error ? apiErrorMessage(login.error) : undefined} />
             <FormField
               id="email"
               type="email"

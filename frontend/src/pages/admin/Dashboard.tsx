@@ -9,7 +9,7 @@ export function AdminDashboardPage() {
   const me = useMe();
   const canAudit = userCan(me.data, Permission.AuditRead);
   return (
-    <div className="container mx-auto py-12 space-y-6">
+    <div className="container mx-auto py-8 space-y-6">
       <h1 className="text-3xl font-bold">Admin</h1>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Link to="/admin/users">

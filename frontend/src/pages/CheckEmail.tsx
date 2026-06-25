@@ -11,7 +11,7 @@ export function CheckEmailPage() {
   const location = useLocation();
   const email = (location.state as { email?: string } | null)?.email;
   return (
-    <div className="container mx-auto max-w-md py-12">
+    <div className="container mx-auto max-w-md py-8">
       <Card>
         <CardHeader>
           <CardTitle>Check your email</CardTitle>
