@@ -27,7 +27,8 @@ namespace {
 class JobsIntegrationTest : public TestHelpers::CoreBackedTest {
 protected:
     // Queue names used by the tests below; TearDown drains exactly these.
-    static constexpr const char* kQueues[] = {"default", "retryq", "cancelq", "pagedq", "healq", "depthq"};
+    static constexpr const char* kQueues[] = {
+        "default", "retryq", "cancelq", "pagedq", "healq", "depthq", "backoffq", "leaseq"};
 
     std::vector<std::string> job_ids_to_cleanup;
 
@@ -63,6 +64,13 @@ protected:
                 } catch (...) {}
             }
             TestHelpers::drain_jobs({std::begin(kQueues), std::end(kQueues)});
+            // The backoff / visibility-timeout ZSETs are global (not per-type),
+            // so drain_jobs doesn't touch them — clear them here to keep tests
+            // isolated.
+            try {
+                Cache::get().get_client().del(Jobs::delayed_key());
+                Cache::get().get_client().del(Jobs::leases_key());
+            } catch (...) {}
         }
         TestHelpers::CoreBackedTest::TearDown();
     }
@@ -288,6 +296,90 @@ TEST_F(JobsIntegrationTest, SetTraceIdPersistsOnBlob) {
     auto status = Jobs::get().get_status(j.id);
     ASSERT_TRUE(status);
     EXPECT_EQ(status->trace_id, trace);
+}
+
+TEST_F(JobsIntegrationTest, BackoffDelaysRequeueUntilDue) {
+    Jobs::get().set_retry_backoff(/*base_ms=*/200, /*max_ms=*/1000);
+
+    auto job = Jobs::get().submit("backoffq", {});
+    track(job.id);
+
+    auto p1 = Jobs::get().pick({"backoffq"}, 2, "w1");
+    ASSERT_TRUE(p1);
+    Jobs::get().fail(job.id, "boom");
+
+    // Retry was counted and the job stays "pending", but with backoff enabled it
+    // is parked in the delayed set, NOT immediately back on the live queue.
+    auto after = Jobs::get().get_status(job.id);
+    ASSERT_TRUE(after);
+    EXPECT_EQ(after->status, "pending");
+    EXPECT_EQ(after->retry_count, 1);
+
+    std::vector<std::string> q;
+    Cache::get().get_client().lrange(Jobs::queue_key("backoffq"), 0, -1, std::back_inserter(q));
+    EXPECT_TRUE(q.empty());
+
+    // Before the delay elapses, promotion moves nothing.
+    EXPECT_EQ(Jobs::get().promote_due_jobs(), 0);
+
+    // After the backoff window, the job is promoted back and pickable again.
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    EXPECT_EQ(Jobs::get().promote_due_jobs(), 1);
+
+    auto p2 = Jobs::get().pick({"backoffq"}, 2, "w1");
+    ASSERT_TRUE(p2);
+    EXPECT_EQ(p2->id, job.id);
+}
+
+TEST_F(JobsIntegrationTest, VisibilityTimeoutReapsExpiredLease) {
+    Jobs::get().set_visibility_timeout(/*sec=*/100);  // pick() now records a lease
+
+    auto job = Jobs::get().submit("leaseq", {});
+    track(job.id);
+
+    auto p1 = Jobs::get().pick({"leaseq"}, 2, "wkr-0");
+    ASSERT_TRUE(p1);
+
+    // Simulate a worker that picked the job and died without completing it:
+    // backdate its lease so it's already expired.
+    Cache::get().get_client().zadd(Jobs::leases_key(), job.id, 1.0);
+
+    // The reaper reclaims the orphaned job: treated as a failure (retry bumped),
+    // dropped from the dead worker's processing list, and requeued.
+    EXPECT_EQ(Jobs::get().reap_expired_leases(), 1);
+
+    auto after = Jobs::get().get_status(job.id);
+    ASSERT_TRUE(after);
+    EXPECT_EQ(after->retry_count, 1);
+
+    std::vector<std::string> proc;
+    Cache::get().get_client().lrange(Jobs::processing_key("wkr-0"), 0, -1, std::back_inserter(proc));
+    EXPECT_TRUE(proc.empty());
+
+    // Backoff is disabled in this test → fail() requeues immediately, so another
+    // worker can pick it up.
+    auto p2 = Jobs::get().pick({"leaseq"}, 2, "wkr-1");
+    ASSERT_TRUE(p2);
+    EXPECT_EQ(p2->id, job.id);
+}
+
+TEST_F(JobsIntegrationTest, CompleteClearsVisibilityLease) {
+    Jobs::get().set_visibility_timeout(/*sec=*/100);
+
+    auto job = Jobs::get().submit("leaseq", {});
+    track(job.id);
+
+    auto p1 = Jobs::get().pick({"leaseq"}, 2, "wkr-0");
+    ASSERT_TRUE(p1);
+    // Lease recorded at pick. (redis-plus-plus Optional has operator bool, not
+    // std::optional's has_value().)
+    EXPECT_TRUE(static_cast<bool>(Cache::get().get_client().zscore(Jobs::leases_key(), job.id)));
+
+    Jobs::get().complete(job.id, {{"ok", true}});
+
+    // Completing the job clears its lease so the reaper can't resurrect it.
+    EXPECT_FALSE(static_cast<bool>(Cache::get().get_client().zscore(Jobs::leases_key(), job.id)));
+    EXPECT_EQ(Jobs::get().reap_expired_leases(), 0);
 }
 
 }  // namespace

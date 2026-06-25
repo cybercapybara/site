@@ -537,6 +537,12 @@ private:
         if (Jobs::is_initialized()) {
             register_health_check("jobs", [] { return Jobs::get().health_check(); });
         }
+        // Optional dependencies (SMTP, object storage, Kafka) belong here as
+        // DEGRADED probes — their outage should show in /health but must NOT
+        // pull the pod out of rotation via /ready. Register them once those
+        // modules expose a cheap connectivity check, e.g.:
+        //   if (Messaging::is_initialized())
+        //       register_health_check("kafka", [] { return Messaging::get().health_check(); }, /*critical=*/false);
     }
 
     static void init_jobs_(Config::AppConfig& cfg) {
@@ -545,6 +551,14 @@ private:
         long ttl = cfg.get<int>("jobs.result_ttl", "JOBS_RESULT_TTL", 86400);
         int retries = cfg.get<int>("jobs.max_retries", "JOBS_MAX_RETRIES", 3);
         Jobs::initialize(ttl, retries);
+        // Reliability knobs (opt-in; 0 keeps the legacy immediate-requeue /
+        // no-lease behaviour). promote_due_jobs() / reap_expired_leases() are
+        // driven from the worker loop.
+        const int backoff_base = cfg.get<int>("jobs.retry_backoff_base_ms", "JOBS_RETRY_BACKOFF_BASE_MS", 0);
+        const int backoff_max = cfg.get<int>("jobs.retry_backoff_max_ms", "JOBS_RETRY_BACKOFF_MAX_MS", 60000);
+        const int visibility = cfg.get<int>("jobs.visibility_timeout_sec", "JOBS_VISIBILITY_TIMEOUT_SEC", 0);
+        Jobs::get().set_retry_backoff(backoff_base, backoff_max);
+        Jobs::get().set_visibility_timeout(visibility);
         register_dlq_metric_(cfg);
         register_queue_depth_metric_(cfg);
     }
@@ -554,19 +568,24 @@ public:
 
     /**
      * @brief Register a health probe. The passed callable is invoked each
-     *        time /health or /ready rolls through the list. Any registered
-     *        probe returning false marks the service unhealthy.
-     *        Thread-safe; typically called once during subsystem init.
+     *        time /health or /ready rolls through the list.
+     * @param critical When true (default) a failing probe makes /ready report
+     *        NotReady (kube pulls the pod from rotation). When false the probe
+     *        is "degraded": still surfaced in /health, but a failure does NOT
+     *        fail readiness — for optional dependencies (SMTP, object storage,
+     *        Kafka) whose outage shouldn't take the whole service out of
+     *        rotation. Thread-safe; typically called once during subsystem init.
      */
-    void register_health_check(std::string name, HealthFn probe) {
+    void register_health_check(std::string name, HealthFn probe, bool critical = true) {
         std::lock_guard<std::mutex> lock(health_mu_);
-        health_checks_.push_back({std::move(name), std::move(probe)});
+        health_checks_.push_back({std::move(name), std::move(probe), critical});
     }
 
     struct ComponentHealth {
         std::string name;
         bool initialized;
         bool healthy;
+        bool critical;
     };
 
     /**
@@ -576,40 +595,49 @@ public:
     std::vector<ComponentHealth> health_report() {
         std::vector<ComponentHealth> report;
         std::lock_guard<std::mutex> lock(health_mu_);
-        for (const auto& [name, probe] : health_checks_) {
+        for (const auto& e : health_checks_) {
             bool ok = false;
             try {
-                ok = probe();
+                ok = e.probe();
             } catch (...) {
                 ok = false;
             }
-            report.push_back({name, true, ok});
+            report.push_back({e.name, true, ok, e.critical});
         }
         return report;
     }
 
-    bool health_check() {
-        if (!initialized)
-            return false;
+    /**
+     * @brief True iff every CRITICAL probe currently passes. Degraded
+     *        (non-critical) probes are ignored — they show up in /health but
+     *        never fail readiness. No `initialized` guard, so it's unit-testable
+     *        directly; health_check() adds that guard for the live /ready path.
+     */
+    bool all_critical_healthy() {
         std::lock_guard<std::mutex> lock(health_mu_);
-        for (const auto& [name, probe] : health_checks_) {
+        for (const auto& e : health_checks_) {
+            if (!e.critical)
+                continue;
             try {
-                if (!probe()) {
-                    spdlog::warn("{} health check failed", name);
+                if (!e.probe()) {
+                    spdlog::warn("{} health check failed", e.name);
                     return false;
                 }
-            } catch (const std::exception& e) {
-                spdlog::warn("{} health check threw: {}", name, e.what());
+            } catch (const std::exception& ex) {
+                spdlog::warn("{} health check threw: {}", e.name, ex.what());
                 return false;
             }
         }
         return true;
     }
 
+    bool health_check() { return initialized && all_critical_healthy(); }
+
 private:
     struct HealthEntry {
         std::string name;
         HealthFn probe;
+        bool critical = true;
     };
     std::vector<HealthEntry> health_checks_;
     std::mutex health_mu_;
