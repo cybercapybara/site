@@ -44,9 +44,10 @@ Usage: $0 [--dry-run] [--force] <project-name> [registry] [domain]
                   script asks for confirmation interactively.
   --no-demo       Strip the pedagogical flask-base reference material a real
                   fork doesn't ship: _reference/flask-base/ (~21 MB Python
-                  source) and docs/PATTERNS-FROM-FLASK-BASE.md. The C++ app —
-                  auth, User/Role/Audit, jobs — is NOT a demo and is kept. See
-                  REMOVING-THE-DEMO.md.
+                  source) and docs/PATTERNS-FROM-FLASK-BASE.md, AND the README
+                  "Live demo" block (demo URL + public demo credentials). The
+                  C++ app — auth, User/Role/Audit, jobs — is NOT a demo and is
+                  kept. See REMOVING-THE-DEMO.md.
 
   domain          Your host/domain — replaces the author's tarassov.me in
                   badges / demo URLs / SECURITY.md (default: example.com).
@@ -185,6 +186,11 @@ declare -a PATTERNS=(
     "s|resert/cpp-rapid-rest-app|${REGISTRY}/${PROJECT_NAME}|g"
     # 2. CI image name
     "s|resert/cpp-rapid-rest-template|${REGISTRY}/${PROJECT_NAME}|g"
+    # 2a. Any other reference to the author's Docker Hub namespace (e.g. the
+    #     `resert/…` prose in release.yml). Runs AFTER the two specific image
+    #     refs above so those rewrite to the fork's full ref first; this only
+    #     mops up the bare owner so a fork can't inherit it.
+    "s|resert/|your-registry/your-project/|g"
     # 2b. GHCR builder-cache namespace (builder-cache.yml, Makefile GHCR default)
     "s|ghcr.io/resert|ghcr.io/${REGISTRY_ORG}|g"
     # 3. Repo-level references
@@ -213,6 +219,20 @@ declare -a PATTERNS=(
     #     links, *.demo.<host> URLs, security@<host>). Runs last so it can't
     #     interfere with the project-name patterns above.
     "s|${AUTHOR_HOST//./\\.}|${NEW_HOST}|g"
+    # 15. Author's real DEMO / INFRA identifiers. These are the live deployment
+    #     source's working defaults — a fork must NOT inherit them. Rewrite to
+    #     loud placeholders so the fork's deploy-demo.sh / values fail closed
+    #     until the new owner fills them in. The verifier below flags survivors.
+    #     - public ingress IP (helm/cpp-env/values-demo.yaml)
+    "s|46\\.225\\.37\\.165|YOUR_INGRESS_IP|g"
+    #     - kube context (scripts/deploy-demo.sh)
+    "s|admin@talos-nbg1|YOUR_KUBE_CONTEXT|g"
+    #     - demo admin password (README, deploy-demo.sh, helm/cpp-env/values.yaml)
+    "s|DemoAdmin-2026|change-me-demo-pass|g"
+    #     - author's personal email, if it ever appears as a template default.
+    #       Pattern 14 has already turned tarassov.me into ${NEW_HOST}, so match
+    #       the post-rewrite form (michael@${NEW_HOST}) → you@${NEW_HOST}.
+    "s|michael@${NEW_HOST//./\\.}|you@${NEW_HOST}|g"
 )
 
 # GNU sed accepts `-i`, BSD/macOS sed requires `-i ''` (an explicit backup
@@ -231,7 +251,7 @@ if [[ $DRY_RUN -eq 1 ]]; then
     echo ""
     echo "==> Files that would be touched (matches at least one pattern):"
     for f in "${FILES[@]}"; do
-        if grep -qE 'cpp-rapid-rest-template|cpp_api_template|cpp-api|cpp_api|cpp-worker|cpp_worker|cpp_producer|cpp_api_bench|cpp_api_service|cpp_worker_service|cpp-api-team|resert/cpp-rapid-rest-template|resert/cpp-rapid-rest-app|tarassov\.me' "$f" 2>/dev/null; then
+        if grep -qE 'cpp-rapid-rest-template|cpp_api_template|cpp-api|cpp_api|cpp-worker|cpp_worker|cpp_producer|cpp_api_bench|cpp_api_service|cpp_worker_service|cpp-api-team|resert/|tarassov\.me|46\.225\.37\.165|admin@talos-nbg1|DemoAdmin-2026' "$f" 2>/dev/null; then
             echo "    $f"
         fi
     done
@@ -247,6 +267,9 @@ if [[ $DRY_RUN -eq 1 ]]; then
         for p in "_reference" "docs/PATTERNS-FROM-FLASK-BASE.md"; do
             [[ -e "$ROOT/$p" ]] && echo "==> Would remove reference material: $p"
         done
+        if [[ -f "$ROOT/README.md" ]] && grep -q 'init-project:live-demo:start' "$ROOT/README.md"; then
+            echo "==> Would strip the README 'Live demo' block + its Contents entry"
+        fi
     fi
     echo ""
     echo "DRY RUN complete. Re-run without --dry-run to apply."
@@ -308,11 +331,24 @@ if [[ $NO_DEMO -eq 1 ]]; then
             while IFS= read -r -d '' f; do
                 sed -i.bak '/PATTERNS-FROM-FLASK-BASE/d' "$f" && rm -f "$f.bak"
             done || true
+
+        # Strip the README "Live demo" section (between the region markers) and
+        # its Contents entry. A fork doesn't run the author's demo, so the block
+        # — which carries the demo URL + public demo credentials — has no place
+        # in a fork's README. The markers were rewritten by the host pattern
+        # above (they contain no host literal, so they survive verbatim).
+        if [[ -f "$ROOT/README.md" ]]; then
+            sed -i.bak \
+                -e '/init-project:live-demo:start/,/init-project:live-demo:end/d' \
+                -e '/init-project:live-demo:toc/d' \
+                "$ROOT/README.md" && rm -f "$ROOT/README.md.bak"
+            echo "==> Stripped README 'Live demo' block (--no-demo)"
+        fi
     fi
 fi
 
 echo "==> Verifying rename completeness"
-LEFTOVER_RE='cpp-rapid-rest-template|cpp_api_template|cpp_api_bench|cpp_api_service|cpp_worker_service|cpp_producer|cpp-api-team|resert/cpp-rapid-rest|ghcr\.io/resert|tarassov\.me'
+LEFTOVER_RE='cpp-rapid-rest-template|cpp_api_template|cpp_api_bench|cpp_api_service|cpp_worker_service|cpp_producer|cpp-api-team|resert/|ghcr\.io/resert|tarassov\.me|46\.225\.37\.165|admin@talos-nbg1|DemoAdmin-2026|michael@tarassov\.me'
 leftovers="$(grep -rInE "$LEFTOVER_RE" . \
     --exclude="$(basename "$0")" \
     --exclude=.git \
