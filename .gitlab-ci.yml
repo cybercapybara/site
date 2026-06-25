@@ -377,47 +377,35 @@ test:coverage:
         fi
         sleep 1
       done
-    - cd ..
-    # Build a coverage-instrumented image based on the builder layer already
-    # cached in the registry (buildcache-arm64). The coverage preset adds
-    # -O0 -g --coverage; no vcpkg reinstall needed (reuses /app/build/vcpkg_installed).
+    # Coverage build + run INSIDE the test-runner compose service so it shares
+    # the app-network and reaches test-postgres/test-redis by name
+    # (TEST_PG_HOST=test-postgres is baked into the service). A raw
+    # `docker run --network host` can't see the compose services, so every
+    # integration suite fails fast and tanks the number. The coverage preset adds
+    # -O0 -g --coverage. gcovr MUST stay on one line: in a folded YAML scalar,
+    # more-indented continuation lines keep their newline and would each run as a
+    # separate command (the previous exit-127 bug).
     - >
-      docker run --rm
-      --network host
-      -e TEST_PG_HOST=127.0.0.1
-      -e TEST_REDIS_HOST=127.0.0.1
-      -e CI_REQUIRE_INFRA=1
-      -v $CI_PROJECT_DIR/coverage-results:/results
+      docker compose --env-file .env --profile test run --rm
       --entrypoint /bin/bash
-      $TEST_IMAGE -c "
+      -e CI_REQUIRE_INFRA=1
+      test-runner -c "
         apt-get update -qq && apt-get install -y -qq gcovr > /dev/null 2>&1 &&
         cd /app &&
         cmake --preset coverage &&
         cmake --build --preset coverage -j\$(nproc) &&
-        ./build/coverage/cpp_api_template_tests_unit --gtest_color=yes || true &&
-        ./build/coverage/cpp_api_template_tests_integration --gtest_color=yes || true &&
-        ./build/coverage/cpp_api_template_e2e --gtest_color=yes || true &&
-        mkdir -p /results &&
-        gcovr -r . --filter 'src/.*'
-          --html-details /results/index.html
-          --xml /results/coverage.xml
-          --print-summary
-          --fail-under-line ${COVERAGE_MIN}
+        (./build/coverage/cpp_api_template_tests_unit --gtest_color=yes || true) &&
+        (./build/coverage/cpp_api_template_tests_integration --gtest_color=yes || true) &&
+        (./build/coverage/cpp_api_template_e2e --gtest_color=yes || true) &&
+        gcovr -r . --filter 'src/.*' --print-summary --fail-under-line ${COVERAGE_MIN}
       "
   after_script:
     - cd docker && docker compose --env-file .env --profile test down -v || true
   # GitLab parses coverage: regex from the job log to populate the pipeline badge.
-  # gcovr --print-summary emits: "lines: 42.3% (1234 out of 2916)"
+  # gcovr --print-summary emits: "lines: 42.3% (1234 out of 2916)". No artifacts:
+  # the run is inside the compose-networked test-runner (no host bind-mount in
+  # dind), so the gate is the in-container --fail-under-line + the badge regex.
   coverage: '/lines:\s+(\d+\.\d+)%/'
-  artifacts:
-    when: always
-    paths:
-      - coverage-results/
-    reports:
-      coverage_report:
-        coverage_format: cobertura
-        path: coverage-results/coverage.xml
-    expire_in: 1 week
   allow_failure: true  # TODO: remove once coverage job is confirmed stable on runner
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
