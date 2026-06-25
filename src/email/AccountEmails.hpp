@@ -43,6 +43,7 @@
 #include "security/Auth.hpp"
 #include "security/Tokens.hpp"
 #include "utils/Config.hpp"
+#include "utils/Strings.hpp"
 
 namespace Email::AccountEmails {
 
@@ -161,16 +162,21 @@ inline void dispatch(const std::string& kind, const Domain::User& user, const st
             if (!new_email.empty())
                 payload["new_email"] = new_email;
             auto job = Jobs::get().submit(kJobType, payload);
-            spdlog::debug("AccountEmails: {} for {} enqueued as job {}", kind, user.email, job.id);
+            spdlog::debug(
+                "AccountEmails: {} for {} enqueued as job {}", kind, Utils::Strings::mask_email(user.email), job.id);
             return;
         } catch (const std::exception& e) {
-            spdlog::warn("AccountEmails: enqueue {} for {} failed ({}); sending inline", kind, user.email, e.what());
+            spdlog::warn("AccountEmails: enqueue {} for {} failed ({}); sending inline",
+                         kind,
+                         Utils::Strings::mask_email(user.email),
+                         e.what());
         }
     }
     try {
         deliver_now(kind, user, new_email);
     } catch (const std::exception& e) {
-        spdlog::warn("AccountEmails: failed to send {} to {}: {}", kind, user.email, e.what());
+        spdlog::warn(
+            "AccountEmails: failed to send {} to {}: {}", kind, Utils::Strings::mask_email(user.email), e.what());
     }
 }
 

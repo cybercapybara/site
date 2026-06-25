@@ -333,6 +333,32 @@ int main(int argc, char* argv[]) {
         if (worker_types.empty()) {
             worker_types = {"default"};
         }
+
+        // Guard rail: a WORKER_TYPES entry with no registered handler silently
+        // dead-letters every job of that type (Dispatcher throws PermanentJobError
+        // → straight to DLQ). Surface the producer/consumer mismatch at startup.
+        // WORKER_STRICT_TYPES=true upgrades the warning to a hard refusal to start.
+        if (auto missing = Jobs::Dispatcher::get().unregistered(worker_types); !missing.empty()) {
+            std::string joined;
+            for (size_t i = 0; i < missing.size(); ++i) {
+                if (i)
+                    joined += ",";
+                joined += missing[i];
+            }
+            if (config.get<bool>("worker.strict_types", "WORKER_STRICT_TYPES", false)) {
+                spdlog::error(
+                    "Worker subscribed to job type(s) with no handler: {} — refusing to start "
+                    "(WORKER_STRICT_TYPES=true). Register a handler or fix WORKER_TYPES.",
+                    joined);
+                return 1;
+            }
+            spdlog::warn(
+                "Worker subscribed to job type(s) with NO registered handler: {} — jobs of these "
+                "types will dead-letter on arrival. Register a handler or fix WORKER_TYPES "
+                "(set WORKER_STRICT_TYPES=true to fail fast).",
+                joined);
+        }
+
         int health_port = config.get<int>("worker.health_port", "WORKER_HEALTH_PORT", 9091);
         long brpop_timeout = config.get<int>("worker.brpop_timeout", "WORKER_BRPOP_TIMEOUT", 5);
 

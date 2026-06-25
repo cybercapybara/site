@@ -40,6 +40,7 @@
 #include <spdlog/spdlog.h>
 
 #include "utils/Config.hpp"
+#include "utils/Strings.hpp"
 
 namespace Email {
 
@@ -203,7 +204,7 @@ public:
     bool send(const Message& msg) {
         if (!config_.enabled) {
             spdlog::info("[mailer disabled] would send to={} subject='{}' body_len={}",
-                         msg.to,
+                         Utils::Strings::mask_email(msg.to),
                          msg.subject,
                          msg.text_body.size());
             return true;
@@ -258,10 +259,11 @@ public:
         curl_slist_free_all(recipients);
 
         if (rc != CURLE_OK) {
-            spdlog::error("Mailer::send to={} failed: {}", msg.to, curl_easy_strerror(rc));
+            spdlog::error("Mailer::send to={} failed: {}", Utils::Strings::mask_email(msg.to), curl_easy_strerror(rc));
             return false;
         }
-        spdlog::info("Mail sent to={} subject='{}' message_id={}", msg.to, msg.subject, message_id);
+        spdlog::info(
+            "Mail sent to={} subject='{}' message_id={}", Utils::Strings::mask_email(msg.to), msg.subject, message_id);
         return true;
     }
 

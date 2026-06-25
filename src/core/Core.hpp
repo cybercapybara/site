@@ -183,6 +183,31 @@ private:
                     "Config validation: auth.cookies.secure=false in production — __Host- cookies are "
                     "dropped and session cookies would travel over plaintext. Set AUTH_COOKIE_SECURE=true.");
         }
+        // Production-safety checks the BINARY enforces regardless of which config
+        // profile / env produced the values — so the Helm deploy path can't quietly
+        // bypass them the way it bypasses prod-check.sh / env-check.sh (they only
+        // run against config.production.json, never the gitignored values-prod.yaml).
+        if (is_prod) {
+            if (!cfg.get<bool>("rate_limit.enabled", "RATE_LIMIT_ENABLED", false))
+                spdlog::warn(
+                    "Config validation: rate_limit.enabled=false in production — /api/auth/login is "
+                    "unthrottled (brute-force exposure). Set RATE_LIMIT_ENABLED=true.");
+            else if (cfg.get<bool>("rate_limit.fail_open", "RATE_LIMIT_FAIL_OPEN", true))
+                spdlog::warn(
+                    "Config validation: rate_limit.fail_open=true in production — a Redis outage "
+                    "silently disables the limiter. Set RATE_LIMIT_FAIL_OPEN=false.");
+            if (cfg.get<bool>("docs.enabled", "DOCS_ENABLED", false))
+                spdlog::warn(
+                    "Config validation: docs.enabled=true in production — the API docs UI is publicly "
+                    "exposed. Set DOCS_ENABLED=false.");
+            // CSRF defense-in-depth when cookie auth is on (mutations otherwise lean
+            // on SameSite=Lax alone).
+            if (auth_mode == "jwt" && cfg.get<bool>("auth.cookies.enabled", "AUTH_COOKIE_ENABLED", false) &&
+                !cfg.get<bool>("security.csrf.enabled", "SECURITY_CSRF_ENABLED", false))
+                spdlog::warn(
+                    "Config validation: cookie auth enabled but security.csrf.enabled=false in "
+                    "production — mutations rely on SameSite=Lax only. Set SECURITY_CSRF_ENABLED=true.");
+        }
         spdlog::info("Config validated (env={}, auth_mode={})", env, auth_mode);
     }
 
