@@ -107,6 +107,19 @@ shutdown:
   preStopDelay: 2         # seconds
 
 # ---------------------------------------------------------------
+# Startup probe — guards the cold start of the C++ worker binary so the
+# liveness probe doesn't begin counting failures until the process is up.
+# failureThreshold * periodSeconds bounds the allowed startup window
+# (default 30 * 5s = 150s). Hits the same /healthz endpoint as liveness.
+# ---------------------------------------------------------------
+startupProbe:
+  enabled: true
+  path: /healthz
+  failureThreshold: 30
+  periodSeconds: 5
+  timeoutSeconds: 3
+
+# ---------------------------------------------------------------
 # Jobs configuration
 # Env vars set: JOBS_ENABLED, JOBS_RESULT_TTL, JOBS_MAX_RETRIES
 # ---------------------------------------------------------------

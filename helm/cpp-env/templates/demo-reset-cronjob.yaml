@@ -38,6 +38,7 @@ spec:
             - name: truncate
               image: {{ .Values.demoReset.psqlImage | quote }}
               securityContext:
+                readOnlyRootFilesystem: true
                 allowPrivilegeEscalation: false
                 capabilities:
                   drop: ["ALL"]
@@ -53,6 +54,9 @@ spec:
                     secretKeyRef:
                       name: {{ $api.fullnameOverride | default "api" }}
                       key: database-password
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
           # 2. Re-create the demo admin + sample users with the running binary
           #    ($APP_BINARY is set in the image; config.json comes from the api
           #    ConfigMap so DB/Redis/JWT wiring matches the live API exactly).
@@ -60,6 +64,7 @@ spec:
             - name: reseed
               image: "{{ $api.image.repository }}:{{ $api.image.tag }}"
               securityContext:
+                readOnlyRootFilesystem: true
                 allowPrivilegeEscalation: false
                 capabilities:
                   drop: ["ALL"]
@@ -97,10 +102,14 @@ spec:
                   readOnly: true
                 - name: logs
                   mountPath: /app/logs
+                - name: tmp
+                  mountPath: /tmp
           volumes:
             - name: config
               configMap:
                 name: {{ $api.fullnameOverride | default "api" }}
             - name: logs
+              emptyDir: {}
+            - name: tmp
               emptyDir: {}
 {{- end }}

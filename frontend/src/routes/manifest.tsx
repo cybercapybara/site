@@ -1,4 +1,4 @@
-import type { ReactElement } from 'react';
+import { lazy, type ReactElement } from 'react';
 import { Shield, ScrollText } from 'lucide-react';
 
 import { Permission } from '@/lib/auth/permissions';
@@ -18,13 +18,32 @@ import { RequestResetPage } from '@/pages/RequestReset';
 import { ResetPasswordPage } from '@/pages/ResetPassword';
 import { JoinFromInvitePage } from '@/pages/JoinFromInvite';
 
-import { AdminDashboardPage } from '@/pages/admin/Dashboard';
-import { AdminUsersPage } from '@/pages/admin/Users';
-import { AdminUserDetailPage } from '@/pages/admin/UserDetail';
-import { AdminInviteUserPage } from '@/pages/admin/InviteUser';
-import { AdminRolesPage } from '@/pages/admin/Roles';
-import { AdminJobsPage } from '@/pages/admin/Jobs';
-import { AdminAuditPage } from '@/pages/admin/Audit';
+// Admin pages are code-split: a logged-out visitor on /login should not pull
+// the whole admin bundle. React.lazy needs a module with a `default` export,
+// so each factory maps the page's named export. App.tsx wraps these routes in
+// a <Suspense> boundary. (named → default shim kept inline to avoid per-page
+// barrel files.)
+const AdminDashboardPage = lazy(() =>
+  import('@/pages/admin/Dashboard').then((m) => ({ default: m.AdminDashboardPage })),
+);
+const AdminUsersPage = lazy(() =>
+  import('@/pages/admin/Users').then((m) => ({ default: m.AdminUsersPage })),
+);
+const AdminUserDetailPage = lazy(() =>
+  import('@/pages/admin/UserDetail').then((m) => ({ default: m.AdminUserDetailPage })),
+);
+const AdminInviteUserPage = lazy(() =>
+  import('@/pages/admin/InviteUser').then((m) => ({ default: m.AdminInviteUserPage })),
+);
+const AdminRolesPage = lazy(() =>
+  import('@/pages/admin/Roles').then((m) => ({ default: m.AdminRolesPage })),
+);
+const AdminJobsPage = lazy(() =>
+  import('@/pages/admin/Jobs').then((m) => ({ default: m.AdminJobsPage })),
+);
+const AdminAuditPage = lazy(() =>
+  import('@/pages/admin/Audit').then((m) => ({ default: m.AdminAuditPage })),
+);
 
 /**
  * Single routes manifest — THE source of truth for both:
@@ -41,7 +60,8 @@ import { AdminAuditPage } from '@/pages/admin/Audit';
  *   - 'auth'      — any signed-in user (confirmed or not). Used by
  *                   /unconfirmed so an unconfirmed user can still land.
  *   - 'confirmed' — signed in AND email-confirmed.
- *   - 'admin'     — signed in, confirmed, AND Permission.Administer.
+ *   - 'admin'     — signed in, confirmed, AND Permission.Administer
+ *                   (the 0x40000000 sentinel bit, not 0xff).
  *
  * `navLabel` opts a route into the top nav. `navIcon` (a lucide icon
  * component) renders before the label. Routes with a dynamic `:param`
@@ -98,7 +118,7 @@ export const routes: RouteEntry[] = [
   { path: '/account/change-password', element: <ChangePasswordPage />, guard: 'confirmed' },
   { path: '/account/change-email', element: <ChangeEmailPage />, guard: 'confirmed' },
 
-  // ── Admin — gated by Permission.Administer (0xff) ───────────────────────
+  // ── Admin — gated by Permission.Administer (0x40000000 sentinel) ────────
   {
     path: '/admin',
     element: <AdminDashboardPage />,
@@ -115,7 +135,8 @@ export const routes: RouteEntry[] = [
   // ── Audit — read-only, gated on kAuditRead (0x02) rather than full ──────
   // Administer. A 'confirmed' guard + requirePermission means App.tsx wraps
   // it in a ProtectedRoute for the AuditRead bit and Nav filters the link by
-  // it; full admins (0xff) carry the bit, so they see it too.
+  // it; full admins (the Administer sentinel) satisfy every check, so they
+  // see it too.
   {
     path: '/admin/audit',
     element: <AdminAuditPage />,

@@ -133,6 +133,16 @@ void worker_loop(const std::string& worker_id, const std::vector<std::string>& t
 
     while (!shutdown_requested.load()) {
         try {
+            // Maintenance: promote backoff-delayed jobs that are due and reclaim
+            // jobs whose visibility lease expired (a worker that died mid-job).
+            // Both are cheap no-ops unless enabled via config; idempotent across
+            // worker threads (ZREM-gated), so running them on every thread/cycle
+            // is safe — worst case is a wasted ZRANGEBYSCORE on an empty set.
+            try {
+                Jobs::get().promote_due_jobs();
+                Jobs::get().reap_expired_leases();
+            } catch (...) {}
+
             auto job = Jobs::get().pick(types, brpop_timeout, worker_id);
             if (!job)
                 continue;

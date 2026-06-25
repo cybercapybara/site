@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { useMe } from '@/hooks/useMe';
 import { apiErrorMessage } from '@/lib/api/client';
 import { userCan } from '@/lib/auth/permissions';
+import type { User } from '@/lib/api/types';
 
 interface ProtectedRouteProps {
   children: ReactNode;
@@ -19,8 +20,12 @@ interface ProtectedRouteProps {
 export interface GuardSessionState {
   isPending: boolean;
   isError: boolean;
-  /** Resolved user, or null on a 401 (logged out). */
-  data: { confirmed?: boolean; role?: unknown } | null | undefined;
+  /**
+   * Resolved user, or null on a 401 (logged out). Narrowed to just the
+   * fields the guard reads (`confirmed` for the unconfirmed redirect, `role`
+   * for the permission check via userCan) so no `as never` cast is needed.
+   */
+  data: Pick<User, 'confirmed' | 'role'> | null | undefined;
 }
 
 export type GuardDecision =
@@ -72,7 +77,7 @@ export function ProtectedRoute({ children, requirePermission, requireConfirmed }
   const decision = guardDecision(
     me,
     { requirePermission, requireConfirmed },
-    (user, bit) => userCan(user as never, bit),
+    (user, bit) => userCan(user, bit),
   );
 
   switch (decision.kind) {

@@ -34,8 +34,15 @@ export const Permission = {
   Administer: 0x40000000,
 } as const;
 
+/**
+ * Minimal user shape userCan() actually inspects: just the role's permission
+ * bitmask. Accepting this (rather than the full User) lets callers pass a
+ * narrowed session slice without an `as` cast.
+ */
+export type PermissionUser = Pick<User, 'role'>;
+
 /** True when the user's role carries ALL requested permission bits. */
-export function userCan(user: User | null | undefined, permission: number): boolean {
+export function userCan(user: PermissionUser | null | undefined, permission: number): boolean {
   if (!user || !user.role) return false;
   const have = user.role.permissions;
   // The admin sentinel satisfies every permission check — admins can do

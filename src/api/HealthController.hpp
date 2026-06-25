@@ -58,21 +58,30 @@ public:
         // services that add their own modules no longer have to hard-code
         // lookups in this method.
         json components = json::object();
-        bool overall_healthy = true;
+        bool critical_ok = true;         // a CRITICAL component is down → 503 unhealthy
+        bool any_degraded_down = false;  // only OPTIONAL deps down → 200 degraded
         if (Core::is_initialized()) {
             for (const auto& c : Core::get().health_report()) {
-                components[c.name] = {{"initialized", c.initialized}, {"healthy", c.healthy}};
-                if (!c.healthy)
-                    overall_healthy = false;
+                components[c.name] = {{"initialized", c.initialized}, {"healthy", c.healthy}, {"critical", c.critical}};
+                if (!c.healthy) {
+                    if (c.critical)
+                        critical_ok = false;
+                    else
+                        any_degraded_down = true;
+                }
             }
         } else {
-            overall_healthy = false;
+            critical_ok = false;
         }
-        auto resp = Response::ok({{"status", overall_healthy ? "healthy" : "unhealthy"},
+        // A degraded optional dependency (SMTP/storage/Kafka) reports "degraded"
+        // but stays 200 — only a critical-component failure returns 503, matching
+        // what /ready (Core::health_check) gates on.
+        const char* status = !critical_ok ? "unhealthy" : (any_degraded_down ? "degraded" : "healthy");
+        auto resp = Response::ok({{"status", status},
                                   {"version", Core::is_initialized() ? Core::get().version() : std::string("unknown")},
                                   {"timestamp", std::time(nullptr)},
                                   {"components", components}});
-        resp->setStatusCode(overall_healthy ? k200OK : k503ServiceUnavailable);
+        resp->setStatusCode(critical_ok ? k200OK : k503ServiceUnavailable);
         callback(resp);
     }
 };

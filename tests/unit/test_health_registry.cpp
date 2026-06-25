@@ -27,6 +27,41 @@ TEST_F(HealthRegistryTest, RegisteredProbeShowsInReport) {
     EXPECT_TRUE(report[0].healthy);
 }
 
+TEST_F(HealthRegistryTest, DegradedProbeIsIgnoredByReadiness) {
+    Core::Application app;
+    app.register_health_check("critical-dep", [] { return true; });
+    // A degraded (non-critical) dependency that is DOWN must not fail readiness.
+    app.register_health_check(
+        "optional-dep", [] { return false; }, /*critical=*/false);
+    EXPECT_TRUE(app.all_critical_healthy());
+}
+
+TEST_F(HealthRegistryTest, CriticalProbeFailureFailsReadiness) {
+    Core::Application app;
+    app.register_health_check("critical-dep", [] { return false; });  // critical by default
+    EXPECT_FALSE(app.all_critical_healthy());
+}
+
+TEST_F(HealthRegistryTest, ReportCarriesCriticalFlag) {
+    Core::Application app;
+    app.register_health_check("critical-dep", [] { return true; });
+    app.register_health_check(
+        "optional-dep", [] { return false; }, /*critical=*/false);
+    auto report = app.health_report();
+    ASSERT_EQ(report.size(), 2u);
+    bool saw_optional = false;
+    for (const auto& c : report) {
+        if (c.name == "critical-dep")
+            EXPECT_TRUE(c.critical);
+        if (c.name == "optional-dep") {
+            saw_optional = true;
+            EXPECT_FALSE(c.critical);
+            EXPECT_FALSE(c.healthy);  // still surfaced as unhealthy in the breakdown
+        }
+    }
+    EXPECT_TRUE(saw_optional);
+}
+
 TEST_F(HealthRegistryTest, FailingProbeMarksUnhealthy) {
     Core::Application app;
     app.register_health_check("bad", [] { return false; });

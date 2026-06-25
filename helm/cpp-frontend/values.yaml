@@ -76,6 +76,17 @@ podSecurityContext:
   fsGroup: 101
 
 # ---------------------------------------------------------------
+# Container security context — hardening for the nginx container.
+#
+# readOnlyRootFilesystem locks the container's root fs read-only (PSS
+# "restricted" baseline). nginx-unprivileged still needs a few writable
+# paths (pid + temp bodies in /tmp, caches in /var/cache/nginx, sockets in
+# /var/run); when this is enabled the chart wires those as emptyDir volumes.
+# ---------------------------------------------------------------
+containerSecurityContext:
+  readOnlyRootFilesystem: true
+
+# ---------------------------------------------------------------
 # Pod scheduling
 # ---------------------------------------------------------------
 podAnnotations: {}
