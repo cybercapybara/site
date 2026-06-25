@@ -7,7 +7,7 @@ import { useMe } from '@/hooks/useMe';
 export function HomePage() {
   const user = useMe().data ?? null;
   return (
-    <div className="container mx-auto py-12 max-w-3xl space-y-6">
+    <div className="container mx-auto py-8 max-w-3xl space-y-6">
       <Card>
         <CardHeader>
           <CardTitle>{user ? `Welcome back, ${user.full_name || user.email}` : 'Welcome'}</CardTitle>

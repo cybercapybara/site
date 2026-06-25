@@ -4,13 +4,14 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import { ConfirmDialog } from '@/components/ConfirmDialog';
-import { FormAlert } from '@/components/FormAlert';
 import { FormField } from '@/components/FormField';
 import { RoleSelect } from '@/components/RoleSelect';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
+import { useToast } from '@/components/ui/toaster';
 import { useApiMutation } from '@/hooks/useApiMutation';
+import { useErrorToast } from '@/hooks/useErrorToast';
 import { useMe } from '@/hooks/useMe';
 import { api } from '@/lib/api/client';
 import { qk } from '@/lib/api/queryKeys';
@@ -19,6 +20,7 @@ import type { UserDetailResponse } from '@/lib/api/types';
 export function AdminUserDetailPage() {
   const { id = '' } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const toast = useToast();
   const [confirmDelete, setConfirmDelete] = useState(false);
   // Query-backed via the TanStack Query cache: the cache is empty for one
   // paint after a hard reload, which would briefly disable the
@@ -33,7 +35,10 @@ export function AdminUserDetailPage() {
   const update = useApiMutation(
     (patch: Record<string, unknown>) =>
       api.patchJson<UserDetailResponse>('/api/admin/users/' + id, { body: patch }),
-    { invalidate: [qk.admin.user(id), qk.admin.users()] },
+    {
+      invalidate: [qk.admin.user(id), qk.admin.users()],
+      onSuccess: () => toast.success('Changes saved.'),
+    },
   );
 
   const remove = useApiMutation(() => api.deleteJson('/api/admin/users/' + id), {
@@ -41,27 +46,23 @@ export function AdminUserDetailPage() {
     onSuccess: () => navigate('/admin/users'),
   });
 
-  const error = update.error ?? remove.error;
+  useErrorToast(update.error ?? remove.error);
 
-  if (userQ.isLoading) return <p className="container py-12">Loading…</p>;
+  if (userQ.isLoading) return <p className="container py-8">Loading…</p>;
   if (userQ.error || !userQ.data)
-    return <p className="container py-12 text-destructive">User not found.</p>;
+    return <p className="container py-8 text-destructive">User not found.</p>;
 
   const user = userQ.data.data;
   const isSelf = me?.id === user.id;
 
   return (
-    <div className="container mx-auto max-w-2xl py-12 space-y-6">
+    <div className="container mx-auto max-w-2xl py-8 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">{user.email}</h1>
         <Button variant="ghost" asChild>
           <Link to="/admin/users">← Back</Link>
         </Button>
       </div>
-      <FormAlert
-        message={error}
-        success={update.isSuccess ? 'Changes saved.' : undefined}
-      />
       <Card>
         <CardHeader>
           <CardTitle>Details</CardTitle>

@@ -48,9 +48,9 @@ export function DataTable<Row>({
     return (
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b text-left text-muted-foreground">
+          <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
             {columns.map((c, i) => (
-              <th key={i} scope="col" className={`py-2 pr-4 ${c.className ?? ''}`}>
+              <th key={i} scope="col" className={`py-1.5 pr-4 font-medium ${c.className ?? ''}`}>
                 {c.header}
               </th>
             ))}
@@ -58,9 +58,9 @@ export function DataTable<Row>({
         </thead>
         <tbody>
           {Array.from({ length: 5 }).map((_, r) => (
-            <tr key={r} className="border-b last:border-0">
+            <tr key={r} className="border-b border-border last:border-0">
               {columns.map((_, i) => (
-                <td key={i} className="py-2 pr-4">
+                <td key={i} className="py-1.5 pr-4">
                   <Skeleton className="h-4 w-full" />
                 </td>
               ))}
@@ -76,9 +76,9 @@ export function DataTable<Row>({
   return (
     <table className={`w-full text-sm ${isPlaceholder ? 'opacity-50' : ''}`}>
       <thead>
-        <tr className="border-b text-left text-muted-foreground">
+        <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
           {columns.map((c, i) => (
-            <th key={i} scope="col" className={`py-2 pr-4 ${c.className ?? ''}`}>
+            <th key={i} scope="col" className={`py-1.5 pr-4 font-medium ${c.className ?? ''}`}>
               {c.header}
             </th>
           ))}
@@ -91,11 +91,11 @@ export function DataTable<Row>({
           return (
             <tr
               key={rowKey(row)}
-              className={`border-b last:border-0 ${extraClass ?? ''}`}
+              className={`border-b border-border transition-colors last:border-0 hover:bg-muted/50 ${extraClass ?? ''}`}
               {...restProps}
             >
               {columns.map((c, i) => (
-                <td key={i} className={`py-2 pr-4 ${c.className ?? ''}`}>
+                <td key={i} className={`py-1.5 pr-4 ${c.className ?? ''}`}>
                   {c.cell(row)}
                 </td>
               ))}

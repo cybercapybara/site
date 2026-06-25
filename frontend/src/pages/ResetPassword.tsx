@@ -3,11 +3,11 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { Link, useParams } from 'react-router-dom';
 import type { z } from 'zod';
 
-import { FormAlert } from '@/components/FormAlert';
 import { Button } from '@/components/ui/button';
 import { FormField } from '@/components/FormField';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useApiMutation } from '@/hooks/useApiMutation';
+import { useErrorToast } from '@/hooks/useErrorToast';
 import { api } from '@/lib/api/client';
 import { resetPasswordSchema } from '@/lib/schemas/auth';
 
@@ -26,11 +26,12 @@ export function ResetPasswordPage() {
       body: { new_password: values.new_password },
     }),
   );
+  useErrorToast(reset.error);
 
   const onSubmit = handleSubmit((values) => reset.mutate(values));
 
   return (
-    <div className="container mx-auto max-w-md py-12">
+    <div className="container mx-auto max-w-md py-8">
       <Card>
         <CardHeader>
           <CardTitle>Set a new password</CardTitle>
@@ -38,14 +39,15 @@ export function ResetPasswordPage() {
         <CardContent>
           {reset.isSuccess ? (
             <div className="space-y-4">
-              <FormAlert success="Password updated. You can log in now." />
+              <p className="text-sm text-muted-foreground">
+                Password updated. You can log in now.
+              </p>
               <Button asChild className="w-full">
                 <Link to="/login">Continue to log in</Link>
               </Button>
             </div>
           ) : (
             <form className="space-y-4" onSubmit={onSubmit}>
-              <FormAlert message={reset.error} />
               <FormField
                 id="new_password"
                 type="password"

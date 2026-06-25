@@ -2,12 +2,12 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { z } from 'zod';
 
-import { FormAlert } from '@/components/FormAlert';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { FormField } from '@/components/FormField';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useApiMutation } from '@/hooks/useApiMutation';
+import { useErrorToast } from '@/hooks/useErrorToast';
 import { api } from '@/lib/api/client';
 import { changeEmailSchema } from '@/lib/schemas/auth';
 
@@ -23,11 +23,12 @@ export function ChangeEmailPage() {
   const change = useApiMutation((values: FormValues) =>
     api.postJson('/api/account/change-email-request', { body: values }),
   );
+  useErrorToast(change.error);
 
   const onSubmit = handleSubmit((values) => change.mutate(values));
 
   return (
-    <div className="container mx-auto max-w-md py-12">
+    <div className="container mx-auto max-w-md py-8">
       <Card>
         <CardHeader>
           <CardTitle>Change your email</CardTitle>
@@ -45,7 +46,6 @@ export function ChangeEmailPage() {
             </Alert>
           ) : (
             <form className="space-y-4" onSubmit={onSubmit}>
-              <FormAlert message={change.error} />
               <FormField
                 id="new_email"
                 type="email"

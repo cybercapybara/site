@@ -59,7 +59,7 @@ export function Nav() {
   };
 
   return (
-    <nav className="border-b">
+    <nav className="border-b border-border bg-background">
       <div className="container mx-auto flex h-14 items-center justify-between">
         <div className="flex items-center gap-6">
           <Link
@@ -79,7 +79,7 @@ export function Nav() {
                   aria-current={isActive(r.path) ? 'page' : undefined}
                   className={cn(
                     'flex items-center gap-1 rounded transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
-                    isActive(r.path) ? 'font-medium text-foreground' : 'text-muted-foreground',
+                    isActive(r.path) ? 'font-medium text-primary' : 'text-muted-foreground',
                   )}
                 >
                   {Icon && <Icon className="h-3.5 w-3.5" />}
@@ -107,7 +107,7 @@ export function Nav() {
                   aria-current={isActive('/account') ? 'page' : undefined}
                   className={cn(
                     'rounded hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
-                    isActive('/account') ? 'text-foreground' : 'text-muted-foreground',
+                    isActive('/account') ? 'text-primary' : 'text-muted-foreground',
                   )}
                 >
                   {user.full_name || user.email}
@@ -145,7 +145,7 @@ export function Nav() {
 
       {/* Mobile stacked panel */}
       {menuOpen && (
-        <div id="mobile-nav" className="border-t md:hidden">
+        <div id="mobile-nav" className="border-t border-border md:hidden">
           <div className="container mx-auto flex flex-col gap-1 py-3 text-sm">
             {navLinks.map((r) => {
               const Icon = r.navIcon;
@@ -157,7 +157,7 @@ export function Nav() {
                   onClick={() => setMenuOpen(false)}
                   className={cn(
                     'flex items-center gap-2 rounded px-2 py-2 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                    isActive(r.path) ? 'font-medium text-foreground' : 'text-muted-foreground',
+                    isActive(r.path) ? 'font-medium text-primary' : 'text-muted-foreground',
                   )}
                 >
                   {Icon && <Icon className="h-4 w-4" />}
@@ -173,7 +173,7 @@ export function Nav() {
                   onClick={() => setMenuOpen(false)}
                   className={cn(
                     'rounded px-2 py-2 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                    isActive('/account') ? 'font-medium text-foreground' : 'text-muted-foreground',
+                    isActive('/account') ? 'font-medium text-primary' : 'text-muted-foreground',
                   )}
                 >
                   {user.full_name || user.email}

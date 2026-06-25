@@ -6,14 +6,14 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>C++ REST Template</title>
     <script>
-      // Apply the saved/preferred theme before first paint to avoid a flash.
+      // Dark is the default; only an explicit 'light' choice opts out. Applied
+      // before first paint to avoid a flash.
       try {
-        var t = localStorage.getItem('theme');
-        if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        if (localStorage.getItem('theme') !== 'light') {
           document.documentElement.classList.add('dark');
         }
       } catch (e) {
-        /* ignore */
+        document.documentElement.classList.add('dark');
       }
     </script>
   </head>
