@@ -175,7 +175,11 @@ function JobDetailCard({ job, onClose }: { job: Job; onClose: () => void }) {
         <div className="flex gap-2">
           {job.trace_id && (
             <Button asChild size="sm" variant="outline">
-              <a href={`${TRACE_UI_URL}/trace/${job.trace_id}`} target="_blank" rel="noreferrer">
+              <a
+                href={`${TRACE_UI_URL}/trace/${job.trace_id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
                 Open trace
               </a>
             </Button>

@@ -36,6 +36,7 @@ export function ConfirmDialog({
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="confirm-title"
+        aria-describedby={description ? 'confirm-desc' : undefined}
         tabIndex={-1}
         className="w-full max-w-sm"
         onClick={(e) => e.stopPropagation()}
@@ -45,7 +46,11 @@ export function ConfirmDialog({
             <h2 id="confirm-title" className="text-lg font-semibold">
               {title}
             </h2>
-            {description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
+            {description && (
+              <p id="confirm-desc" className="mt-1 text-sm text-muted-foreground">
+                {description}
+              </p>
+            )}
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={onClose} disabled={busy}>
