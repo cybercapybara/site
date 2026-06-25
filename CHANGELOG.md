@@ -6,6 +6,29 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.3.4] — 2026-06-25
+
+Hardening and reliability from a full project review.
+
+### Added
+- Jobs: opt-in exponential retry backoff plus a cross-worker visibility-timeout
+  reaper that reclaims jobs orphaned by a crashed worker (enabled in production).
+- Health: degraded (non-critical) probes — surfaced in `/health` but never fail
+  `/ready`, so an optional dependency outage no longer pulls the pod from rotation.
+- CI: Trivy scans for the worker and frontend images, a coverage job, frontend
+  ESLint in GitLab, and full-history gitleaks.
+
+### Changed
+- Frontend: theme bootstrap moved to an external script so the production CSP no
+  longer blocks it; admin pages are code-split.
+- Helm: frontend and the demo-reset job run with a read-only root filesystem;
+  api/worker gain a `startupProbe`.
+
+### Fixed
+- Frontend: corrected the admin permission sentinel shown in the UI
+  (`0x40000000`, not `0xff`); reverse-tabnabbing and a dialog a11y gap.
+- Production deploy: re-enable rate limiting and stop double-running migrations.
+
 ## [1.3.3] — 2026-06-25
 
 Frontend redesign + the real fix for notification layout shift.
