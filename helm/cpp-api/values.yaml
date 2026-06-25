@@ -360,6 +360,20 @@ shutdown:
   shutdownPreStopDelaySec: 5 # seconds
 
 # ---------------------------------------------------------------
+# Startup probe — guards the cold start of the C++ binary (and, when the
+# migrate init-container is disabled, in-process migrations) so the liveness
+# probe doesn't begin counting failures until the process is actually up.
+# failureThreshold * periodSeconds bounds the allowed startup window
+# (default 30 * 5s = 150s). Hits the same /healthz endpoint as liveness.
+# ---------------------------------------------------------------
+startupProbe:
+  enabled: true
+  path: /healthz
+  failureThreshold: 30
+  periodSeconds: 5
+  timeoutSeconds: 3
+
+# ---------------------------------------------------------------
 # Tracing — OpenTelemetry OTLP exporter
 # Env var set: OTLP_ENDPOINT
 # ---------------------------------------------------------------

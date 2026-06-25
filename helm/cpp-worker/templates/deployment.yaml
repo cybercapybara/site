@@ -48,6 +48,15 @@ spec:
             preStop:
               exec:
                 command: ["/bin/sh", "-c", "sleep {{ .Values.shutdown.preStopDelay | default 2 }}"]
+          {{- if .Values.startupProbe.enabled }}
+          startupProbe:
+            httpGet:
+              path: {{ .Values.startupProbe.path }}
+              port: health
+            failureThreshold: {{ .Values.startupProbe.failureThreshold }}
+            periodSeconds: {{ .Values.startupProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.startupProbe.timeoutSeconds }}
+          {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz
