@@ -128,6 +128,18 @@ inline std::string index_key_for(const std::string& type) {
 inline std::string processing_key(const std::string& worker_id) {
     return "jobs:processing:" + worker_id;
 }
+// Backoff retry set (sorted set, score = ready-at epoch millis): a failed job
+// with backoff enabled parks here until promote_due_jobs() moves it back onto
+// its live queue. Global, not per-type — the job blob carries the type.
+inline std::string delayed_key() {
+    return "jobs:delayed";
+}
+// Visibility-timeout leases (sorted set, score = expires-at epoch millis): a
+// picked job is leased here when visibility timeout is enabled; the reaper
+// reclaims any lease whose deadline has passed (a worker that died mid-job).
+inline std::string leases_key() {
+    return "jobs:leases";
+}
 inline constexpr const char* kDlqAllKey = "jobs:dlq:_all";
 
 /**

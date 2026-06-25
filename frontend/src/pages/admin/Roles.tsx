@@ -62,7 +62,9 @@ export function AdminRolesPage() {
       header: 'Permissions',
       className: 'font-mono',
       cell: (r) =>
-        r.permissions === ADMIN_ALL_BITS ? '0xff (all)' : `0x${r.permissions.toString(16)}`,
+        r.permissions === ADMIN_ALL_BITS
+          ? `0x${ADMIN_ALL_BITS.toString(16)} (all)`
+          : `0x${r.permissions.toString(16)}`,
     },
     {
       header: 'Default?',
@@ -225,7 +227,7 @@ function RoleFormCard({ title, initial, submitting, onSubmit, onCancel }: RoleFo
                 onChange={(e) => setAdminAll(e.target.checked)}
               />
               <label htmlFor="role-admin-all" className="text-sm">
-                Administrator (all bits, 0xff)
+                Administrator (all, 0x{ADMIN_ALL_BITS.toString(16)})
               </label>
             </div>
             {/* Each input below carries `disabled={adminAll}`, which removes

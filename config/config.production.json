@@ -121,7 +121,10 @@
   "jobs": {
     "enabled": "${JOBS_ENABLED:-true}",
     "result_ttl": 86400,
-    "max_retries": 3
+    "max_retries": 3,
+    "retry_backoff_base_ms": 1000,
+    "retry_backoff_max_ms": 60000,
+    "visibility_timeout_sec": 300
   },
   "worker": {
     "id": "${WORKER_ID:-worker-1}",

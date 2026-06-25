@@ -196,7 +196,12 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Run clang-tidy inside builder
-        continue-on-error: true   # ratchet: flip to false once .clang-tidy is clean
+        # continue-on-error: ratchet — flip to false once baseline is clean.
+        # Checks come from .clang-tidy in the repo root (mounted read-only).
+        # GitLab CI counterpart previously had -checks=-* (disabled ALL checks);
+        # that flag is now removed there too. Both jobs now use the .clang-tidy
+        # config (bugprone-*, performance-*, portability-*, clang-analyzer-*).
+        continue-on-error: true  # TODO: flip to false once baseline is clean
         run: |
           docker run --rm \
               -v "$PWD":/src \

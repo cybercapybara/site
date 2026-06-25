@@ -44,6 +44,18 @@ private:
     bool initialized_ = false;
     long result_ttl_ = 86400;  // seconds
     int default_max_retries_ = 3;
+    // Retry backoff (opt-in). 0 = legacy behaviour: fail() requeues immediately.
+    // >0 = a failed job is parked in jobs:delayed for an exponentially growing
+    // delay (base * 2^(retry_count-1), capped at max), promoted back by
+    // promote_due_jobs() — kills the tight pick→fail→pick loop on a near-empty
+    // queue.
+    int64_t retry_backoff_base_ms_ = 0;
+    int64_t retry_backoff_max_ms_ = 60000;
+    // Visibility timeout (opt-in). 0 = leases disabled (only same-worker startup
+    // recovery). >0 = pick() leases the job in jobs:leases for this many ms;
+    // reap_expired_leases() reclaims any lease a crashed worker never cleared,
+    // re-running it via fail() (so a permanently-stuck job eventually DLQs).
+    int64_t visibility_timeout_ms_ = 0;
     // shared_ptr (not unique_ptr) so pick() can hold a local copy for the
     // duration of its BRPOP: shutdown() dropping the manager's reference then
     // can't free the client out from under an in-flight blocking pop.
@@ -62,6 +74,21 @@ public:
         initialized_ = true;
         spdlog::info("Job queue initialized (result_ttl={}s, max_retries={})", result_ttl_, default_max_retries_);
     }
+
+    /**
+     * @brief Enable exponential retry backoff. base_ms=0 disables it (legacy
+     *        immediate requeue). Called once during init from config.
+     */
+    void set_retry_backoff(int64_t base_ms, int64_t max_ms) {
+        retry_backoff_base_ms_ = base_ms < 0 ? 0 : base_ms;
+        retry_backoff_max_ms_ = max_ms < base_ms ? base_ms : max_ms;
+    }
+
+    /**
+     * @brief Enable the visibility-timeout lease. sec<=0 disables it. Called
+     *        once during init from config.
+     */
+    void set_visibility_timeout(int64_t sec) { visibility_timeout_ms_ = sec <= 0 ? 0 : sec * 1000; }
 
     /**
      * @brief Dedicated standalone Redis client for blocking BRPOP. The Cache
@@ -225,6 +252,18 @@ public:
         // Update status in Redis
         redis.set(job_key(job.id), job.to_json().dump());
 
+        // Lease the job so a cross-worker reaper can reclaim it if this worker
+        // dies before complete()/fail(). Best-effort: a missed lease only loses
+        // the visibility-timeout safety net, not the job (startup recovery still
+        // covers a same-id restart).
+        if (visibility_timeout_ms_ > 0) {
+            try {
+                redis.zadd(leases_key(),
+                           job.id,
+                           static_cast<double>(Utils::Time::now_epoch_millis() + visibility_timeout_ms_));
+            } catch (...) {}
+        }
+
         spdlog::debug("Job picked: id={} type={} worker={}", job.id, job.type, worker_id);
         return job;
     }
@@ -254,6 +293,7 @@ public:
                 redis.lrem(processing_key(job.worker_id), 0, id);
             } catch (...) {}
         }
+        clear_lease_(redis, id);
         spdlog::debug("Job completed: id={}", id);
     }
 
@@ -280,14 +320,25 @@ public:
                 redis.lrem(processing_key(job.worker_id), 0, id);
             } catch (...) {}
         }
+        clear_lease_(redis, id);
 
         if (job.retry_count < job.max_retries) {
-            // Requeue for retry
+            // Requeue for retry.
             job.status = "pending";
             job.error = error;
             redis.set(job_key(id), job.to_json().dump());
-            redis.lpush(queue_key(job.type), id);
-            spdlog::info("Job {} requeued (retry {}/{}): {}", id, job.retry_count, job.max_retries, error);
+            const int64_t delay_ms = backoff_delay_ms_(job.retry_count);
+            if (delay_ms > 0) {
+                // Park in the delayed set; promote_due_jobs() returns it to the
+                // live queue once the backoff window elapses. Avoids a tight
+                // pick→fail→pick loop when the queue is otherwise empty.
+                redis.zadd(delayed_key(), id, static_cast<double>(Utils::Time::now_epoch_millis() + delay_ms));
+                spdlog::info(
+                    "Job {} retry {}/{} scheduled in {}ms: {}", id, job.retry_count, job.max_retries, delay_ms, error);
+            } else {
+                redis.lpush(queue_key(job.type), id);
+                spdlog::info("Job {} requeued (retry {}/{}): {}", id, job.retry_count, job.max_retries, error);
+            }
         } else {
             // Max retries exceeded — send to dead-letter queue for inspection.
             // DLQ entries are NOT reaped by result_ttl_ (operator must drain
@@ -320,6 +371,7 @@ public:
                 redis.lrem(processing_key(job.worker_id), 0, id);
             } catch (...) {}
         }
+        clear_lease_(redis, id);
         job.status = "dead";
         job.error = error;
         // Index BEFORE committing the blob: the 3 writes aren't atomic, and if
@@ -521,6 +573,80 @@ public:
     }
 
     /**
+     * @brief Move every job whose backoff window has elapsed from the delayed
+     *        set back onto its live queue. Cheap no-op when backoff is disabled.
+     *        Call periodically from the worker loop.
+     * @return number of jobs promoted.
+     */
+    long promote_due_jobs() {
+        if (!initialized_ || retry_backoff_base_ms_ <= 0)
+            return 0;
+        auto& redis = Cache::get().get_client();
+        const auto now_ms = Utils::Time::now_epoch_millis();
+        std::vector<std::string> ids;
+        try {
+            redis.zrangebyscore(
+                delayed_key(),
+                sw::redis::BoundedInterval<double>(0.0, static_cast<double>(now_ms), sw::redis::BoundType::CLOSED),
+                std::back_inserter(ids));
+        } catch (...) {
+            return 0;
+        }
+        long moved = 0;
+        for (const auto& id : ids) {
+            try {
+                // ZREM-gate: only the caller that actually removes the id pushes
+                // it, so concurrent workers never double-promote the same job.
+                if (redis.zrem(delayed_key(), id) == 0)
+                    continue;
+                auto data = redis.get(job_key(id));
+                if (!data)
+                    continue;  // blob expired — drop the orphaned delayed entry
+                auto job = Job::from_json(json::parse(*data));
+                redis.lpush(queue_key(job.type), id);
+                ++moved;
+            } catch (...) {}
+        }
+        return moved;
+    }
+
+    /**
+     * @brief Reclaim jobs whose visibility lease has expired — a worker picked
+     *        them and died without complete()/fail(), so no same-id startup
+     *        recovery will ever rescue them. Each is run back through fail()
+     *        (bumps retry, requeues or DLQs), so a permanently-wedged job is not
+     *        reaped forever. Cheap no-op when the lease is disabled. Call
+     *        periodically from the worker loop.
+     * @return number of leases reclaimed.
+     */
+    long reap_expired_leases() {
+        if (!initialized_ || visibility_timeout_ms_ <= 0)
+            return 0;
+        auto& redis = Cache::get().get_client();
+        const auto now_ms = Utils::Time::now_epoch_millis();
+        std::vector<std::string> ids;
+        try {
+            redis.zrangebyscore(
+                leases_key(),
+                sw::redis::BoundedInterval<double>(0.0, static_cast<double>(now_ms), sw::redis::BoundType::CLOSED),
+                std::back_inserter(ids));
+        } catch (...) {
+            return 0;
+        }
+        long reaped = 0;
+        for (const auto& id : ids) {
+            try {
+                // ZREM-gate so exactly one reaper handles each expired lease.
+                if (redis.zrem(leases_key(), id) == 0)
+                    continue;
+                fail(id, "visibility timeout exceeded");
+                ++reaped;
+            } catch (...) {}
+        }
+        return reaped;
+    }
+
+    /**
      * @brief Get job status by ID
      */
     std::optional<Job> get_status(const std::string& id) {
@@ -569,6 +695,7 @@ public:
         redis.lrem(queue_key(job.type), 0, id);
         if (was_processing && !job.worker_id.empty())
             redis.lrem(processing_key(job.worker_id), 0, id);
+        clear_lease_(redis, id);
 
         spdlog::debug("Job cancelled: id={}", id);
         return true;
@@ -695,6 +822,32 @@ private:
         if (!initialized_) {
             throw std::runtime_error("JobQueue not initialized");
         }
+    }
+
+    // Drop a job's visibility lease (no-op when the feature is off or the lease
+    // is already gone). Called from every terminal/transition path so the reaper
+    // never resurrects a job that already moved on.
+    void clear_lease_(sw::redis::Redis& redis, const std::string& id) {
+        if (visibility_timeout_ms_ <= 0)
+            return;
+        try {
+            redis.zrem(leases_key(), id);
+        } catch (...) {}
+    }
+
+    // Backoff delay for a job that just failed its @p retry_count-th attempt
+    // (>=1). Exponential (base * 2^(retry_count-1)), capped at the configured
+    // max. Returns 0 when backoff is disabled → caller requeues immediately.
+    int64_t backoff_delay_ms_(int retry_count) const {
+        if (retry_backoff_base_ms_ <= 0)
+            return 0;
+        int shift = retry_count > 0 ? retry_count - 1 : 0;
+        if (shift > 30)
+            shift = 30;  // guard the shift against overflow
+        int64_t delay = retry_backoff_base_ms_ << shift;
+        if (delay <= 0 || delay > retry_backoff_max_ms_)
+            delay = retry_backoff_max_ms_;
+        return delay;
     }
 
     /**

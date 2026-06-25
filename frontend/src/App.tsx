@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import { Routes, Route, Outlet } from 'react-router-dom';
 
 import { Layout } from '@/components/Layout';
@@ -19,10 +20,20 @@ function RequireAuth() {
   );
 }
 
+// Fallback shown while a code-split admin chunk loads. Matches the plain
+// "Loading…" the guards already use, so the transition is visually quiet.
+const ChunkFallback = (
+  <div className="container mx-auto py-8 text-muted-foreground">Loading…</div>
+);
+
 function RequireConfirmed() {
+  // The /admin/audit route's element is lazy, so the confirmed group needs a
+  // Suspense boundary too (not just the admin group).
   return (
     <ProtectedRoute requireConfirmed>
-      <Outlet />
+      <Suspense fallback={ChunkFallback}>
+        <Outlet />
+      </Suspense>
     </ProtectedRoute>
   );
 }
@@ -30,7 +41,9 @@ function RequireConfirmed() {
 function RequireAdmin() {
   return (
     <ProtectedRoute requirePermission={Permission.Administer} requireConfirmed>
-      <Outlet />
+      <Suspense fallback={ChunkFallback}>
+        <Outlet />
+      </Suspense>
     </ProtectedRoute>
   );
 }
@@ -70,7 +83,7 @@ export default function App() {
         {/* Authenticated + confirmed */}
         <Route element={<RequireConfirmed />}>{routesFor('confirmed').map(renderRoute)}</Route>
 
-        {/* Admin — gated by Permission.Administer (0xff) */}
+        {/* Admin — gated by Permission.Administer (0x40000000 sentinel) */}
         <Route element={<RequireAdmin />}>{routesFor('admin').map(renderRoute)}</Route>
 
         <Route path="*" element={<NotFoundPage />} />
