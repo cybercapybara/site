@@ -329,23 +329,23 @@ test:sanitizers:
     - if: $CI_COMMIT_BRANCH == "master"
     - if: $CI_COMMIT_BRANCH == "develop"
 
-# Coverage — build with gcov instrumentation, run all test buckets against live
-# Postgres + Redis (same compose profile as test:integration), emit Cobertura XML
-# for the GitLab coverage badge and an HTML report as artifact.
+# Coverage — build with gcov instrumentation and run all test buckets against
+# live Postgres + Redis, INSIDE the test-runner compose service so it shares
+# app-network and reaches the sidecars by name (exactly like test:integration; a
+# raw `docker run --network host` can't, which silently tanked the number).
 #
-# Infrastructure notes (needs verification on real runner):
-#   • Uses docker-compose --profile test, same as test:integration.
-#   • Runs the coverage-instrumented binary directly inside a dind container;
-#     gcovr is installed in the same container.
-#   • Integration and e2e buckets need Postgres + Redis — they run with || true
-#     (same as `make coverage`) so a missing sidecar degrades coverage numbers
-#     instead of failing the job outright. On CI the sidecars ARE available, so
-#     in practice all three buckets run.
+# Notes:
+#   • Integration + e2e buckets need Postgres + Redis; they run with || true so a
+#     missing sidecar degrades the number instead of failing outright. On CI the
+#     sidecars are up, so all three buckets run.
+#   • No artifacts: the run lives inside the compose-networked container (no host
+#     bind-mount works reliably under dind), so the gate is the in-container
+#     `gcovr --fail-under-line` and the badge comes from the `coverage:` regex
+#     over the job log — NOT a Cobertura/HTML artifact.
 #   • COVERAGE_MIN is passed in; defaults to 40 (matches Makefile).
-#   • gcovr cobertura output is what GitLab reads for the coverage: badge.
 #
-# TODO: verify cobertura path + gcovr version on the actual arm64 runner image
-#       before treating the badge number as authoritative.
+# TODO: confirm gcovr version on the arm64 runner image before treating the
+#       badge number as authoritative.
 test:coverage:
   stage: test
   image: docker:24.0.7
