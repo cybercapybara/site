@@ -164,7 +164,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/auth/register": {
+    "/api/v1/auth/register": {
         parameters: {
             query?: never;
             header?: never;
@@ -222,7 +222,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/auth/login": {
+    "/api/v1/auth/login": {
         parameters: {
             query?: never;
             header?: never;
@@ -274,7 +274,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/auth/logout": {
+    "/api/v1/auth/logout": {
         parameters: {
             query?: never;
             header?: never;
@@ -310,7 +310,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/auth/refresh": {
+    "/api/v1/auth/refresh": {
         parameters: {
             query?: never;
             header?: never;
@@ -354,7 +354,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/auth/me": {
+    "/api/v1/auth/me": {
         parameters: {
             query?: never;
             header?: never;
@@ -397,7 +397,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/account/confirm-resend": {
+    "/api/v1/account/confirm-resend": {
         parameters: {
             query?: never;
             header?: never;
@@ -438,7 +438,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/account/confirm/{token}": {
+    "/api/v1/account/confirm/{token}": {
         parameters: {
             query?: never;
             header?: never;
@@ -488,7 +488,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/account/reset-password-request": {
+    "/api/v1/account/reset-password-request": {
         parameters: {
             query?: never;
             header?: never;
@@ -529,7 +529,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/account/reset-password/{token}": {
+    "/api/v1/account/reset-password/{token}": {
         parameters: {
             query?: never;
             header?: never;
@@ -578,7 +578,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/account/change-email-request": {
+    "/api/v1/account/change-email-request": {
         parameters: {
             query?: never;
             header?: never;
@@ -627,7 +627,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/account/change-email/{token}": {
+    "/api/v1/account/change-email/{token}": {
         parameters: {
             query?: never;
             header?: never;
@@ -677,7 +677,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/account/join-from-invite/{token}": {
+    "/api/v1/account/join-from-invite/{token}": {
         parameters: {
             query?: never;
             header?: never;
@@ -726,7 +726,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/account/change-password": {
+    "/api/v1/account/change-password": {
         parameters: {
             query?: never;
             header?: never;
@@ -774,7 +774,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/account/api-keys": {
+    "/api/v1/account/api-keys": {
         parameters: {
             query?: never;
             header?: never;
@@ -846,7 +846,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/account/api-keys/{id}": {
+    "/api/v1/account/api-keys/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -896,7 +896,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/admin/users": {
+    "/api/v1/admin/users": {
         parameters: {
             query?: never;
             header?: never;
@@ -994,7 +994,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/admin/invite": {
+    "/api/v1/admin/invite": {
         parameters: {
             query?: never;
             header?: never;
@@ -1054,7 +1054,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/admin/users/{id}": {
+    "/api/v1/admin/users/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1211,7 +1211,7 @@ export interface paths {
         };
         trace?: never;
     };
-    "/api/admin/roles": {
+    "/api/v1/admin/roles": {
         parameters: {
             query?: never;
             header?: never;
@@ -1305,7 +1305,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/admin/roles/{id}": {
+    "/api/v1/admin/roles/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1431,7 +1431,7 @@ export interface paths {
         };
         trace?: never;
     };
-    "/api/admin/audit": {
+    "/api/v1/admin/audit": {
         parameters: {
             query?: never;
             header?: never;
@@ -1490,7 +1490,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/jobs": {
+    "/api/v1/jobs": {
         parameters: {
             query?: never;
             header?: never;
@@ -1573,7 +1573,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/jobs/{id}": {
+    "/api/v1/jobs/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1645,7 +1645,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/jobs/dlq": {
+    "/api/v1/jobs/dlq": {
         parameters: {
             query?: never;
             header?: never;
@@ -1684,7 +1684,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/jobs/dlq/{id}/requeue": {
+    "/api/v1/jobs/dlq/{id}/requeue": {
         parameters: {
             query?: never;
             header?: never;

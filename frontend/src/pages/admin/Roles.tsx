@@ -32,7 +32,7 @@ export function AdminRolesPage() {
   const rolesQ = useAdminRoles();
 
   const create = useApiMutation(
-    (form: RoleFormState) => api.postJson<{ data: Role }>('/api/admin/roles', { body: form }),
+    (form: RoleFormState) => api.postJson<{ data: Role }>('/api/v1/admin/roles', { body: form }),
     {
       invalidate: [qk.admin.roles()],
       onSuccess: () => setCreating(false),
@@ -41,14 +41,14 @@ export function AdminRolesPage() {
 
   const update = useApiMutation(
     (vars: { id: number; form: RoleFormState }) =>
-      api.patchJson<{ data: Role }>(`/api/admin/roles/${vars.id}`, { body: vars.form }),
+      api.patchJson<{ data: Role }>(`/api/v1/admin/roles/${vars.id}`, { body: vars.form }),
     {
       invalidate: [qk.admin.roles()],
       onSuccess: () => setEditing(null),
     },
   );
 
-  const remove = useApiMutation((id: number) => api.deleteJson(`/api/admin/roles/${id}`), {
+  const remove = useApiMutation((id: number) => api.deleteJson(`/api/v1/admin/roles/${id}`), {
     invalidate: [qk.admin.roles()],
     onSuccess: () => setDeleting(null),
   });

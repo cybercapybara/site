@@ -30,7 +30,7 @@ describe('fetchMe (useMe queryFn)', () => {
     get.mockResolvedValueOnce({ data: { user }, error: undefined });
 
     await expect(fetchMe()).resolves.toEqual(user);
-    expect(get).toHaveBeenCalledWith('/api/auth/me');
+    expect(get).toHaveBeenCalledWith('/api/v1/auth/me');
   });
 
   it('resolves to null on 401 without throwing (logged out)', async () => {

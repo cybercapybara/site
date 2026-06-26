@@ -28,7 +28,7 @@ describe('submitJoinFromInvite', () => {
     post.mockResolvedValueOnce({ data: { ok: true }, error: undefined });
 
     await expect(submitJoinFromInvite('tok123', 'hunter2pw')).resolves.toEqual({ ok: true });
-    expect(post).toHaveBeenCalledWith('/api/account/join-from-invite/tok123', {
+    expect(post).toHaveBeenCalledWith('/api/v1/account/join-from-invite/tok123', {
       body: { new_password: 'hunter2pw' },
     });
   });
@@ -37,7 +37,7 @@ describe('submitJoinFromInvite', () => {
     post.mockResolvedValueOnce({ data: { ok: true }, error: undefined });
 
     await submitJoinFromInvite('a/b c', 'hunter2pw');
-    expect(post).toHaveBeenCalledWith('/api/account/join-from-invite/a%2Fb%20c', {
+    expect(post).toHaveBeenCalledWith('/api/v1/account/join-from-invite/a%2Fb%20c', {
       body: { new_password: 'hunter2pw' },
     });
   });

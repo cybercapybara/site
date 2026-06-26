@@ -24,7 +24,7 @@ export function ChangePasswordPage() {
 
   const change = useApiMutation(
     (values: FormValues) =>
-      api.postJson('/api/account/change-password', {
+      api.postJson('/api/v1/account/change-password', {
         body: {
           old_password: values.old_password,
           new_password: values.new_password,

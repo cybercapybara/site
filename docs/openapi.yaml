@@ -285,7 +285,7 @@ paths:
         '503': { description: One or more components unhealthy }
 
   # ── Auth ───────────────────────────────────────────────────────────────────
-  /api/auth/register:
+  /api/v1/auth/register:
     post:
       summary: Register a new user
       tags: [auth]
@@ -306,7 +306,7 @@ paths:
           description: User created — confirmation email queued
         '400': { description: Validation failed }
         '409': { description: Email already registered }
-  /api/auth/login:
+  /api/v1/auth/login:
     post:
       summary: Log in
       tags: [auth]
@@ -330,7 +330,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/MeResponse' }
         '401': { description: Invalid email or password }
-  /api/auth/logout:
+  /api/v1/auth/logout:
     post:
       summary: Log out (clears cookies + revokes refresh token)
       tags: [auth]
@@ -341,7 +341,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/MessageResponse' }
-  /api/auth/refresh:
+  /api/v1/auth/refresh:
     post:
       summary: Rotate access + refresh tokens
       tags: [auth]
@@ -355,7 +355,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/MeResponse' }
         '401': { description: Refresh token missing / expired / revoked }
-  /api/auth/me:
+  /api/v1/auth/me:
     get:
       summary: Get the authenticated user
       tags: [auth]
@@ -369,7 +369,7 @@ paths:
         '401': { description: Not authenticated }
 
   # ── Account self-service ───────────────────────────────────────────────────
-  /api/account/confirm-resend:
+  /api/v1/account/confirm-resend:
     post:
       summary: Resend the email-confirmation link to the current user
       tags: [account]
@@ -377,7 +377,7 @@ paths:
       responses:
         '200': { description: Confirmation email queued }
         '401': { description: Not authenticated }
-  /api/account/confirm/{token}:
+  /api/v1/account/confirm/{token}:
     post:
       summary: Confirm an account from an email link
       tags: [account]
@@ -390,7 +390,7 @@ paths:
         '200': { description: Account confirmed }
         '400': { description: Invalid or expired token }
         '404': { description: User not found }
-  /api/account/reset-password-request:
+  /api/v1/account/reset-password-request:
     post:
       summary: Start a password reset (email-based)
       tags: [account]
@@ -405,7 +405,7 @@ paths:
                 email: { type: string, format: email }
       responses:
         '200': { description: If the email is registered, a reset link is on its way }
-  /api/account/reset-password/{token}:
+  /api/v1/account/reset-password/{token}:
     post:
       summary: Apply a password reset using an email-link token
       tags: [account]
@@ -426,7 +426,7 @@ paths:
       responses:
         '200': { description: Password updated }
         '400': { description: Invalid or expired token }
-  /api/account/change-email-request:
+  /api/v1/account/change-email-request:
     post:
       summary: Start an email-change flow (verifies password, mails a link to new address)
       tags: [account]
@@ -444,7 +444,7 @@ paths:
       responses:
         '200': { description: Confirmation email sent to the new address }
         '401': { description: Wrong password or not authenticated }
-  /api/account/change-email/{token}:
+  /api/v1/account/change-email/{token}:
     post:
       summary: Apply a pending email change from token
       tags: [account]
@@ -457,7 +457,7 @@ paths:
         '200': { description: Email updated }
         '400': { description: Invalid or expired token }
         '409': { description: Email already in use }
-  /api/account/join-from-invite/{token}:
+  /api/v1/account/join-from-invite/{token}:
     post:
       summary: Set password and confirm account from an invite token
       tags: [account]
@@ -478,7 +478,7 @@ paths:
       responses:
         '200': { description: Account ready — the invitee can now sign in }
         '400': { description: Invalid or expired invitation token }
-  /api/account/change-password:
+  /api/v1/account/change-password:
     post:
       summary: Change password while logged in (verifies old password)
       tags: [account]
@@ -497,7 +497,7 @@ paths:
         '200': { description: Password updated }
         '401': { description: Wrong current password or not authenticated }
 
-  /api/account/api-keys:
+  /api/v1/account/api-keys:
     get:
       summary: List your API keys (metadata only; never the secret)
       tags: [account]
@@ -522,7 +522,7 @@ paths:
         '201': { description: Key created; `key` field holds the one-time secret }
         '401': { description: Not authenticated }
 
-  /api/account/api-keys/{id}:
+  /api/v1/account/api-keys/{id}:
     delete:
       summary: Revoke one of your API keys
       tags: [account]
@@ -535,7 +535,7 @@ paths:
         '404': { description: No such key (or not yours) }
 
   # ── Admin (require Permission::ADMINISTER) ────────────────────────────────
-  /api/admin/users:
+  /api/v1/admin/users:
     get:
       summary: List users (admin)
       tags: [admin]
@@ -576,7 +576,7 @@ paths:
         '400': { description: Validation failed }
         '403': { description: Not an admin }
         '409': { description: Email already registered }
-  /api/admin/invite:
+  /api/v1/admin/invite:
     post:
       summary: Invite a user via email (admin)
       tags: [admin]
@@ -601,7 +601,7 @@ paths:
               schema: { $ref: '#/components/schemas/InviteResponse' }
         '403': { description: Not an admin }
         '409': { description: Email already registered }
-  /api/admin/users/{id}:
+  /api/v1/admin/users/{id}:
     parameters:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     get:
@@ -655,7 +655,7 @@ paths:
         '400': { description: Self-delete refused }
         '403': { description: Not an admin }
         '404': { description: User not found }
-  /api/admin/roles:
+  /api/v1/admin/roles:
     get:
       summary: List roles (admin)
       tags: [admin]
@@ -691,7 +691,7 @@ paths:
         '400': { description: Validation failed }
         '403': { description: Not an admin }
         '409': { description: Role name already exists }
-  /api/admin/roles/{id}:
+  /api/v1/admin/roles/{id}:
     parameters:
       - { name: id, in: path, required: true, schema: { type: integer } }
     patch:
@@ -734,7 +734,7 @@ paths:
         '404': { description: Role not found }
         '409': { description: Role is referenced by users — reassign first }
 
-  /api/admin/audit:
+  /api/v1/admin/audit:
     get:
       summary: List the audit trail (admin)
       description: Requires the audit-read permission bit (Domain::Permission::kAuditRead); full admins hold it.
@@ -756,7 +756,7 @@ paths:
               schema: { $ref: '#/components/schemas/AuditListResponse' }
         '403': { description: Missing the audit-read permission }
 
-  /api/jobs:
+  /api/v1/jobs:
     get:
       summary: List jobs (admin; newest first, offset-paginated)
       tags: [jobs]
@@ -787,7 +787,7 @@ paths:
         '201': { description: Submitted }
         '400': { description: Validation failed }
 
-  /api/jobs/{id}:
+  /api/v1/jobs/{id}:
     parameters:
       - name: id
         in: path
@@ -808,7 +808,7 @@ paths:
         '200': { description: Cancelled }
         '404': { description: Not found or already finished }
 
-  /api/jobs/dlq:
+  /api/v1/jobs/dlq:
     get:
       summary: List dead-letter queue jobs
       tags: [jobs]
@@ -823,7 +823,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DlqListResponse' }
 
-  /api/jobs/dlq/{id}/requeue:
+  /api/v1/jobs/dlq/{id}/requeue:
     parameters:
       - name: id
         in: path

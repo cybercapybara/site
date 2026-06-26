@@ -49,16 +49,16 @@ using json = nlohmann::json;
 class AdminController : public HttpController<AdminController> {
 public:
     METHOD_LIST_BEGIN
-    ADD_METHOD_TO(AdminController::listUsers, "/api/admin/users", Get);
-    ADD_METHOD_TO(AdminController::createUser, "/api/admin/users", Post);
-    ADD_METHOD_TO(AdminController::inviteUser, "/api/admin/invite", Post);
-    ADD_METHOD_TO(AdminController::getUser, "/api/admin/users/{1}", Get);
-    ADD_METHOD_TO(AdminController::updateUser, "/api/admin/users/{1}", Patch);
-    ADD_METHOD_TO(AdminController::deleteUser, "/api/admin/users/{1}", Delete);
-    ADD_METHOD_TO(AdminController::listRoles, "/api/admin/roles", Get);
-    ADD_METHOD_TO(AdminController::createRole, "/api/admin/roles", Post);
-    ADD_METHOD_TO(AdminController::updateRole, "/api/admin/roles/{1}", Patch);
-    ADD_METHOD_TO(AdminController::deleteRole, "/api/admin/roles/{1}", Delete);
+    ADD_METHOD_TO(AdminController::listUsers, "/api/v1/admin/users", Get);
+    ADD_METHOD_TO(AdminController::createUser, "/api/v1/admin/users", Post);
+    ADD_METHOD_TO(AdminController::inviteUser, "/api/v1/admin/invite", Post);
+    ADD_METHOD_TO(AdminController::getUser, "/api/v1/admin/users/{1}", Get);
+    ADD_METHOD_TO(AdminController::updateUser, "/api/v1/admin/users/{1}", Patch);
+    ADD_METHOD_TO(AdminController::deleteUser, "/api/v1/admin/users/{1}", Delete);
+    ADD_METHOD_TO(AdminController::listRoles, "/api/v1/admin/roles", Get);
+    ADD_METHOD_TO(AdminController::createRole, "/api/v1/admin/roles", Post);
+    ADD_METHOD_TO(AdminController::updateRole, "/api/v1/admin/roles/{1}", Patch);
+    ADD_METHOD_TO(AdminController::deleteRole, "/api/v1/admin/roles/{1}", Delete);
     METHOD_LIST_END
 
     void listUsers(const HttpRequestPtr& req, std::function<void(const HttpResponsePtr&)>&& callback) {

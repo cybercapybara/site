@@ -30,12 +30,12 @@ public:
     METHOD_LIST_BEGIN
     // Fixed-path routes must be registered before parameterized routes so
     // that /api/jobs/dlq does not accidentally match /api/jobs/{1}.
-    ADD_METHOD_TO(JobsController::listDlq, "/api/jobs/dlq", Get);
-    ADD_METHOD_TO(JobsController::requeueDlq, "/api/jobs/dlq/{1}/requeue", Post);
-    ADD_METHOD_TO(JobsController::listJobs, "/api/jobs", Get);
-    ADD_METHOD_TO(JobsController::submitJob, "/api/jobs", Post);
-    ADD_METHOD_TO(JobsController::getJobStatus, "/api/jobs/{1}", Get);
-    ADD_METHOD_TO(JobsController::cancelJob, "/api/jobs/{1}", Delete);
+    ADD_METHOD_TO(JobsController::listDlq, "/api/v1/jobs/dlq", Get);
+    ADD_METHOD_TO(JobsController::requeueDlq, "/api/v1/jobs/dlq/{1}/requeue", Post);
+    ADD_METHOD_TO(JobsController::listJobs, "/api/v1/jobs", Get);
+    ADD_METHOD_TO(JobsController::submitJob, "/api/v1/jobs", Post);
+    ADD_METHOD_TO(JobsController::getJobStatus, "/api/v1/jobs/{1}", Get);
+    ADD_METHOD_TO(JobsController::cancelJob, "/api/v1/jobs/{1}", Delete);
     METHOD_LIST_END
 
     void listJobs(const HttpRequestPtr& req, std::function<void(const HttpResponsePtr&)>&& callback) {

@@ -611,7 +611,7 @@ inline void register_access_log_post() {
 }  // namespace middleware
 
 /**
- * @brief Register /api/docs (Swagger UI) and /api/openapi.yaml if
+ * @brief Register /api/v1/docs (Swagger UI) and /api/v1/openapi.yaml if
  *        `docs.enabled` is true. Off by default — intended for dev and
  *        internal deployments, never production. The Swagger UI HTML is
  *        served inline (tiny snippet pointing at the unpkg CDN), and the
@@ -625,10 +625,10 @@ inline void register_docs_endpoints() {
 
     const std::string yaml_path =
         Config::get().get<std::string>("docs.openapi_path", "DOCS_OPENAPI_PATH", "docs/openapi.yaml");
-    spdlog::info("Swagger UI enabled — mounting /api/docs (spec from {})", yaml_path);
+    spdlog::info("Swagger UI enabled — mounting /api/v1/docs (spec from {})", yaml_path);
 
     drogon::app().registerHandler(
-        "/api/openapi.yaml",
+        "/api/v1/openapi.yaml",
         [yaml_path](const drogon::HttpRequestPtr&, std::function<void(const drogon::HttpResponsePtr&)>&& cb) {
             std::ifstream f(yaml_path);
             if (!f.good()) {
@@ -645,7 +645,7 @@ inline void register_docs_endpoints() {
         {drogon::Get});
 
     drogon::app().registerHandler(
-        "/api/docs",
+        "/api/v1/docs",
         [](const drogon::HttpRequestPtr&, std::function<void(const drogon::HttpResponsePtr&)>&& cb) {
             static const std::string kSwaggerUiHtml = R"(<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><title>API docs</title>
@@ -653,7 +653,7 @@ inline void register_docs_endpoints() {
 </head><body><div id="swagger-ui"></div>
 <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
 <script>window.onload = () => { SwaggerUIBundle({
-  url: '/api/openapi.yaml', dom_id: '#swagger-ui', deepLinking: true,
+  url: '/api/v1/openapi.yaml', dom_id: '#swagger-ui', deepLinking: true,
   presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset]
 }); };</script></body></html>)";
             auto resp = drogon::HttpResponse::newHttpResponse();

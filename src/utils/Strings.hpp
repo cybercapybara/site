@@ -29,11 +29,11 @@ namespace Utils::Strings {
  */
 inline constexpr const char* kDefaultPublicPathsCsv =
     "/,/healthz,/ready,/health,/metrics,"
-    "/api/docs,/api/openapi.yaml,"
-    "/api/auth/login,/api/auth/register,/api/auth/refresh,"
-    "/api/account/confirm/*,/api/account/reset-password-request,"
-    "/api/account/reset-password/*,/api/account/change-email/*,"
-    "/api/account/join-from-invite/*";
+    "/api/v1/docs,/api/v1/openapi.yaml,"
+    "/api/v1/auth/login,/api/v1/auth/register,/api/v1/auth/refresh,"
+    "/api/v1/account/confirm/*,/api/v1/account/reset-password-request,"
+    "/api/v1/account/reset-password/*,/api/v1/account/change-email/*,"
+    "/api/v1/account/join-from-invite/*";
 
 /**
  * @brief Public endpoints that must STILL be rate-limited despite being
@@ -44,16 +44,16 @@ inline constexpr const char* kDefaultPublicPathsCsv =
  *
  * This is the auth/account subset of kDefaultPublicPathsCsv minus the infra
  * and static surface (`/`, `/healthz`, `/ready`, `/health`, `/metrics`,
- * `/api/docs`, `/api/openapi.yaml`), which we never want to throttle. The
+ * `/api/v1/docs`, `/api/v1/openapi.yaml`), which we never want to throttle. The
  * general limiter skips everything in api.public_paths; without this list the
  * auth surface would be skipped too, leaving it wide open. Matched the same
  * way as public paths (exact, or trailing `*` prefix).
  */
 inline constexpr const char* kDefaultProtectedPathsCsv =
-    "/api/auth/login,/api/auth/register,/api/auth/refresh,"
-    "/api/account/confirm/*,/api/account/reset-password-request,"
-    "/api/account/reset-password/*,/api/account/change-email/*,"
-    "/api/account/join-from-invite/*";
+    "/api/v1/auth/login,/api/v1/auth/register,/api/v1/auth/refresh,"
+    "/api/v1/account/confirm/*,/api/v1/account/reset-password-request,"
+    "/api/v1/account/reset-password/*,/api/v1/account/change-email/*,"
+    "/api/v1/account/join-from-invite/*";
 
 /**
  * @brief True if @p path is covered by @p public_paths — exact match, or a

@@ -104,7 +104,7 @@ function JobsTab() {
   const { data, isLoading, error, isPlaceholderData, page, setPage, totalPages } = usePagedQuery({
     queryKey: qk.admin.jobs(typeFilter),
     queryFn: ({ limit, offset }) =>
-      api.getJson('/api/jobs', {
+      api.getJson('/api/v1/jobs', {
         query: { limit, offset, ...(typeFilter ? { type: typeFilter } : {}) },
       }),
     perPage: PER_PAGE,
@@ -242,12 +242,12 @@ function DlqTab() {
     error: loadError,
   } = useQuery({
     queryKey: qk.admin.jobsDlq(),
-    queryFn: () => api.getJson<DlqListResponse>('/api/jobs/dlq?limit=100'),
+    queryFn: () => api.getJson<DlqListResponse>('/api/v1/jobs/dlq?limit=100'),
     refetchInterval: 5000,
   });
 
   const requeue = useApiMutation(
-    (id: string) => api.postJson(`/api/jobs/dlq/${id}/requeue`, { body: {} }),
+    (id: string) => api.postJson(`/api/v1/jobs/dlq/${id}/requeue`, { body: {} }),
     // Refresh the DLQ so the requeued row disappears (preventing a double
     // requeue); also bump the jobs list since the job is back in flight.
     { invalidate: [qk.admin.jobsDlq(), qk.admin.jobs()] },

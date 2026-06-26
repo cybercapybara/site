@@ -29,19 +29,19 @@ export function AdminUserDetailPage() {
 
   const userQ = useQuery({
     queryKey: qk.admin.user(id),
-    queryFn: () => api.getJson<UserDetailResponse>('/api/admin/users/' + id),
+    queryFn: () => api.getJson<UserDetailResponse>('/api/v1/admin/users/' + id),
   });
 
   const update = useApiMutation(
     (patch: Record<string, unknown>) =>
-      api.patchJson<UserDetailResponse>('/api/admin/users/' + id, { body: patch }),
+      api.patchJson<UserDetailResponse>('/api/v1/admin/users/' + id, { body: patch }),
     {
       invalidate: [qk.admin.user(id), qk.admin.users()],
       onSuccess: () => toast.success('Changes saved.'),
     },
   );
 
-  const remove = useApiMutation(() => api.deleteJson('/api/admin/users/' + id), {
+  const remove = useApiMutation(() => api.deleteJson('/api/v1/admin/users/' + id), {
     invalidate: [qk.admin.users()],
     onSuccess: () => navigate('/admin/users'),
   });

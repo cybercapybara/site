@@ -7,7 +7,7 @@ export function useLogin() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (vars: { email: string; password: string }) =>
-      (await api.postJson('/api/auth/login', { body: vars })).user,
+      (await api.postJson('/api/v1/auth/login', { body: vars })).user,
     onSuccess: (user) => {
       // Seed the cache so the UI flips instantly, then revalidate.
       qc.setQueryData(qk.me(), user);
@@ -28,7 +28,7 @@ export function useRegister() {
       first_name?: string;
       last_name?: string;
     }) => {
-      await api.postJson('/api/auth/register', { body: vars });
+      await api.postJson('/api/v1/auth/register', { body: vars });
     },
   });
 }
@@ -37,7 +37,7 @@ export function useLogout() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      await api.POST('/api/auth/logout');
+      await api.POST('/api/v1/auth/logout');
     },
     onSuccess: () => {
       qc.clear();

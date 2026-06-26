@@ -48,14 +48,14 @@ using json = nlohmann::json;
 class AccountController : public HttpController<AccountController> {
 public:
     METHOD_LIST_BEGIN
-    ADD_METHOD_TO(AccountController::resendConfirm, "/api/account/confirm-resend", Post);
-    ADD_METHOD_TO(AccountController::confirm, "/api/account/confirm/{1}", Post);
-    ADD_METHOD_TO(AccountController::requestReset, "/api/account/reset-password-request", Post);
-    ADD_METHOD_TO(AccountController::applyReset, "/api/account/reset-password/{1}", Post);
-    ADD_METHOD_TO(AccountController::requestChangeEmail, "/api/account/change-email-request", Post);
-    ADD_METHOD_TO(AccountController::applyChangeEmail, "/api/account/change-email/{1}", Post);
-    ADD_METHOD_TO(AccountController::joinFromInvite, "/api/account/join-from-invite/{1}", Post);
-    ADD_METHOD_TO(AccountController::changePassword, "/api/account/change-password", Post);
+    ADD_METHOD_TO(AccountController::resendConfirm, "/api/v1/account/confirm-resend", Post);
+    ADD_METHOD_TO(AccountController::confirm, "/api/v1/account/confirm/{1}", Post);
+    ADD_METHOD_TO(AccountController::requestReset, "/api/v1/account/reset-password-request", Post);
+    ADD_METHOD_TO(AccountController::applyReset, "/api/v1/account/reset-password/{1}", Post);
+    ADD_METHOD_TO(AccountController::requestChangeEmail, "/api/v1/account/change-email-request", Post);
+    ADD_METHOD_TO(AccountController::applyChangeEmail, "/api/v1/account/change-email/{1}", Post);
+    ADD_METHOD_TO(AccountController::joinFromInvite, "/api/v1/account/join-from-invite/{1}", Post);
+    ADD_METHOD_TO(AccountController::changePassword, "/api/v1/account/change-password", Post);
     METHOD_LIST_END
 
     // ---------------------------------------------------------------------

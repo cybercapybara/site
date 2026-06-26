@@ -26,7 +26,7 @@ export async function submitJoinFromInvite(
   newPassword: string,
 ): Promise<JoinResult> {
   const { error } = await api.POST(
-    '/api/account/join-from-invite/' + encodeURIComponent(token),
+    '/api/v1/account/join-from-invite/' + encodeURIComponent(token),
     { body: { new_password: newPassword } },
   );
   if (error) {

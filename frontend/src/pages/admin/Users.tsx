@@ -38,7 +38,7 @@ export function AdminUsersPage() {
   const { data, isLoading, error, isPlaceholderData, page, setPage, totalPages } = usePagedQuery({
     queryKey: qk.admin.users(),
     queryFn: ({ limit, offset }) =>
-      api.getJson('/api/admin/users', { query: { limit, offset } }),
+      api.getJson('/api/v1/admin/users', { query: { limit, offset } }),
     perPage: PER_PAGE,
   });
 
