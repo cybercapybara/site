@@ -32,6 +32,16 @@ struct MigrationFile {
     fs::path path;
 };
 
+/// A migration opts out of the wrapping transaction with a `-- migrate:no-transaction`
+/// line, so it runs in autocommit with statement_timeout cleared — required for
+/// CREATE INDEX CONCURRENTLY and long backfills, which cannot run inside a
+/// transaction (and would be killed by the API statement_timeout). Such a file
+/// MUST contain a SINGLE statement: libpq wraps a multi-statement string in an
+/// implicit transaction, which CONCURRENTLY rejects.
+inline bool has_no_transaction_marker(const std::string& sql) {
+    return sql.find("-- migrate:no-transaction") != std::string::npos;
+}
+
 /**
  * @brief Migration runner that applies SQL migrations on startup
  */
@@ -140,6 +150,37 @@ private:
         return buffer.str();
     }
 
+    // Apply a `-- migrate:no-transaction` migration in AUTOCOMMIT with
+    // statement_timeout cleared, so CREATE INDEX CONCURRENTLY / long backfills
+    // work. A SESSION advisory lock (released on every path) serializes booting
+    // replicas — the transaction-scoped lock the normal path uses needs a txn.
+    // with_primary_connection restores the pool's statement_timeout afterwards.
+    // @return true if applied, false if another instance applied it first.
+    bool apply_no_transaction_(const MigrationFile& mf, const std::string& sql) {
+        return Database::get().with_primary_connection([&](pqxx::connection& c) -> bool {
+            pqxx::nontransaction nt(c);
+            nt.exec("SET statement_timeout = 0");
+            nt.exec("SELECT pg_advisory_lock(4242424242)");
+            bool applied = false;
+            try {
+                auto seen = nt.exec_params("SELECT 1 FROM schema_migrations WHERE version = $1", mf.version);
+                if (seen.empty()) {
+                    nt.exec(sql);  // single statement — autocommits immediately
+                    nt.exec_params(
+                        "INSERT INTO schema_migrations (version, name) VALUES ($1, $2)", mf.version, mf.name);
+                    applied = true;
+                }
+            } catch (...) {
+                try {
+                    nt.exec("SELECT pg_advisory_unlock(4242424242)");
+                } catch (...) {}
+                throw;
+            }
+            nt.exec("SELECT pg_advisory_unlock(4242424242)");
+            return applied;
+        });
+    }
+
 public:
     void initialize(const std::string& dir) {
         if (initialized) {
@@ -176,15 +217,22 @@ public:
             // both running the DDL and one crashing on the schema_migrations
             // PK conflict. Re-check applied-state INSIDE the lock: the loser
             // of the race finds the row already present and skips the DDL.
-            const bool did_apply = Database::get().execute_write([&](auto& txn) -> bool {
-                txn.exec("SELECT pg_advisory_xact_lock(4242424242)");
-                auto seen = txn.exec_params("SELECT 1 FROM schema_migrations WHERE version = $1", mf.version);
-                if (!seen.empty())
-                    return false;  // another booting instance applied it first
-                txn.exec(sql);
-                txn.exec_params("INSERT INTO schema_migrations (version, name) VALUES ($1, $2)", mf.version, mf.name);
-                return true;
-            });
+            bool did_apply;
+            if (has_no_transaction_marker(sql)) {
+                spdlog::info("Migration {} runs WITHOUT a transaction (autocommit, statement_timeout cleared)",
+                             mf.name);
+                did_apply = apply_no_transaction_(mf, sql);
+            } else
+                did_apply = Database::get().execute_write([&](auto& txn) -> bool {
+                    txn.exec("SELECT pg_advisory_xact_lock(4242424242)");
+                    auto seen = txn.exec_params("SELECT 1 FROM schema_migrations WHERE version = $1", mf.version);
+                    if (!seen.empty())
+                        return false;  // another booting instance applied it first
+                    txn.exec(sql);
+                    txn.exec_params(
+                        "INSERT INTO schema_migrations (version, name) VALUES ($1, $2)", mf.version, mf.name);
+                    return true;
+                });
 
             if (did_apply) {
                 spdlog::info("Migration {} applied successfully", mf.name);

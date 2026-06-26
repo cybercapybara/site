@@ -203,6 +203,12 @@ private:
     }
 
 public:
+    /// Re-apply the per-connection session guards (statement_timeout). Call after
+    /// code that mutated session state — e.g. a no-transaction migration that did
+    /// `SET statement_timeout = 0` — so the next borrower of this pooled
+    /// connection doesn't inherit the cleared timeout.
+    void reapply_session_guards(pqxx::connection& c) { apply_session_guards(c); }
+
     /**
      * @brief Construct connection pool
      * @param conn_str PostgreSQL connection string
@@ -512,6 +518,28 @@ public:
     template <typename Func>
     auto execute_transaction(Func&& func) -> decltype(func(std::declval<detail::TracingTxn<pqxx::work>&>())) {
         return execute_transaction(IsolationLevel::ReadCommitted, std::forward<Func>(func));
+    }
+
+    /// Borrow a PRIMARY connection and hand the RAW pqxx::connection to @p func —
+    /// no transaction wrapper, no retry, no tracing. For the rare statement that
+    /// must run in autocommit (CREATE INDEX CONCURRENTLY in a no-transaction
+    /// migration). The pool's session guards (statement_timeout) are re-applied
+    /// when func returns, so a `SET statement_timeout = 0` can't leak to the next
+    /// borrower. Most callers want execute_write/execute_read instead.
+    template <typename Func>
+    auto with_primary_connection(Func&& func) -> decltype(func(std::declval<pqxx::connection&>())) {
+        auto& pool = *primary_pool_or_throw_();
+        PooledConnection conn(pool);
+        struct GuardRestore {
+            ConnectionPool& p;
+            pqxx::connection& c;
+            ~GuardRestore() {
+                try {
+                    p.reapply_session_guards(c);
+                } catch (...) {}
+            }
+        } restore{pool, *conn};
+        return func(*conn);
     }
 
     /**
