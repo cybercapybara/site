@@ -677,3 +677,34 @@ release:images:
       docker buildx imagetools create -t $IMAGE_NAME-frontend:$CI_COMMIT_TAG
       $IMAGE_NAME-frontend:$CI_COMMIT_SHORT_SHA-amd64
       $IMAGE_NAME-frontend:$CI_COMMIT_SHORT_SHA-arm64
+
+# Auto-create a GitLab Release object on every vX.Y.Z tag, with notes pulled
+# from the matching CHANGELOG section. A git tag alone does NOT create a Release
+# (the /-/releases page entry) — this closes that gap so a tag can't ship without
+# one (v1.3.4 was missed when releases were created by hand).
+release:gitlab:
+  stage: publish
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  needs: []
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+  script:
+    # Extract the "## [X.Y.Z]" section from CHANGELOG.md into release_notes.md.
+    # Falls back to a generic note if no section exists, so the Release is always
+    # created.
+    - |
+      VER="${CI_COMMIT_TAG#v}"
+      awk -v ver="$VER" '
+        $0 ~ "^## \\[" ver "\\]" {f=1; next}
+        f && /^## \[/ {exit}
+        f {print}
+      ' CHANGELOG.md > release_notes.md
+      if [ ! -s release_notes.md ]; then
+        echo "Release $CI_COMMIT_TAG. See CHANGELOG.md for details." > release_notes.md
+      fi
+      echo "--- release notes ---"; cat release_notes.md
+  release:
+    tag_name: "$CI_COMMIT_TAG"
+    name: "Release $CI_COMMIT_TAG"
+    description: ./release_notes.md
+  allow_failure: true  # a Release hiccup must never red the tag pipeline
