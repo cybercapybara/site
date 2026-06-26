@@ -32,7 +32,8 @@ TEST(RequestUtilsTest, UuidSegmentRedacted) {
 }
 
 TEST(RequestUtilsTest, AccountTokensRedacted) {
-    EXPECT_EQ(normalize_path_for_metrics("/api/v1/account/confirm/eyJhbGciOi.JTV.sig"), "/api/v1/account/confirm/:token");
+    EXPECT_EQ(normalize_path_for_metrics("/api/v1/account/confirm/eyJhbGciOi.JTV.sig"),
+              "/api/v1/account/confirm/:token");
     EXPECT_EQ(normalize_path_for_metrics("/api/v1/account/reset-password/some.long.token"),
               "/api/v1/account/reset-password/:token");
     EXPECT_EQ(normalize_path_for_metrics("/api/v1/account/change-email/some.long.token"),
@@ -45,7 +46,8 @@ TEST(RequestUtilsTest, AccountTokensRedacted) {
 
 TEST(RequestUtilsTest, RequestVariantsNotMistakenForTokenRoutes) {
     // The *-request / *-resend single-segment routes carry no token.
-    EXPECT_EQ(normalize_path_for_metrics("/api/v1/account/reset-password-request"), "/api/v1/account/reset-password-request");
+    EXPECT_EQ(normalize_path_for_metrics("/api/v1/account/reset-password-request"),
+              "/api/v1/account/reset-password-request");
     EXPECT_EQ(normalize_path_for_metrics("/api/v1/account/confirm-resend"), "/api/v1/account/confirm-resend");
 }
 

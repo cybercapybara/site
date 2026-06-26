@@ -309,7 +309,8 @@ TEST(HttpE2E, IdempotencyKeyReplaysResponse) {
     EXPECT_EQ(r2->getHeader("x-idempotent-replayed"), "true");
 
     // Same key + DIFFERENT body → 422 conflict.
-    auto third = json_post("/api/v1/auth/register", {{"email", "e2e-other@example.com"}, {"password", "password-e2e-1"}});
+    auto third =
+        json_post("/api/v1/auth/register", {{"email", "e2e-other@example.com"}, {"password", "password-e2e-1"}});
     third->addHeader("Idempotency-Key", "e2e-key-001");
     EXPECT_EQ(send(third)->statusCode(), k422UnprocessableEntity);
 }
