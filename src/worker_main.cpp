@@ -331,7 +331,11 @@ int main(int argc, char* argv[]) {
             } catch (...) {}
         }
         if (worker_types.empty()) {
-            worker_types = {"default"};
+            // Fall back to every registered handler type (not a hardcoded
+            // "default" pseudo-queue that has no handler — which the guard rail
+            // below would then flag on every boot). register_builtin_handlers()
+            // ran above, so this is the real set this binary can process.
+            worker_types = Jobs::Dispatcher::get().known_types();
         }
 
         // Guard rail: a WORKER_TYPES entry with no registered handler silently
@@ -350,6 +354,7 @@ int main(int argc, char* argv[]) {
                     "Worker subscribed to job type(s) with no handler: {} — refusing to start "
                     "(WORKER_STRICT_TYPES=true). Register a handler or fix WORKER_TYPES.",
                     joined);
+                Core::shutdown();  // tear down subsystems + flush logs, like the other refuse-to-start paths
                 return 1;
             }
             spdlog::warn(

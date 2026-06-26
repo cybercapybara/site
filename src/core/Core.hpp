@@ -205,7 +205,7 @@ private:
                     "exposed. Set DOCS_ENABLED=false.");
             // CSRF defense-in-depth when cookie auth is on (mutations otherwise lean
             // on SameSite=Lax alone).
-            if (auth_mode == "jwt" && cfg.get<bool>("auth.cookies.enabled", "AUTH_COOKIE_ENABLED", false) &&
+            if (auth_mode == "jwt" && cfg.get<bool>("auth.cookies.enabled", "AUTH_COOKIES_ENABLED", false) &&
                 !cfg.get<bool>("security.csrf.enabled", "SECURITY_CSRF_ENABLED", false))
                 spdlog::warn(
                     "Config validation: cookie auth enabled but security.csrf.enabled=false in "

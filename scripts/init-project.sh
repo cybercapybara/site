@@ -186,13 +186,16 @@ declare -a PATTERNS=(
     "s|resert/cpp-rapid-rest-app|${REGISTRY}/${PROJECT_NAME}|g"
     # 2. CI image name
     "s|resert/cpp-rapid-rest-template|${REGISTRY}/${PROJECT_NAME}|g"
-    # 2a. Any other reference to the author's Docker Hub namespace (e.g. the
-    #     `resert/…` prose in release.yml). Runs AFTER the two specific image
-    #     refs above so those rewrite to the fork's full ref first; this only
-    #     mops up the bare owner so a fork can't inherit it.
-    "s|resert/|your-registry/your-project/|g"
-    # 2b. GHCR builder-cache namespace (builder-cache.yml, Makefile GHCR default)
+    # 2b. GHCR builder-cache namespace (builder-cache.yml, Makefile GHCR default).
+    #     Runs BEFORE the broad bare-owner rule (2a) below — otherwise 2a's
+    #     `resert/` → placeholder rewrite would eat the `resert` inside a
+    #     `ghcr.io/resert/…` URL first and leave this a no-op.
     "s|ghcr.io/resert|ghcr.io/${REGISTRY_ORG}|g"
+    # 2a. Any other reference to the author's Docker Hub namespace (e.g. the
+    #     `resert/…` prose in release.yml). Runs AFTER the specific image refs
+    #     above so those rewrite to the fork's full ref first; this only mops up
+    #     the bare owner so a fork can't inherit it.
+    "s|resert/|your-registry/your-project/|g"
     # 3. Repo-level references
     "s|cpp-rapid-rest-template|${PROJECT_NAME}|g"
     # 4. CMake project name, binary names, Dockerfile

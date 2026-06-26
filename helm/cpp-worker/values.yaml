@@ -111,7 +111,7 @@ worker:
   # MUST include "account_email" (transactional confirm/reset/change-email) and
   # "email.send" (generic ad-hoc email) — a worker that only drains "default"
   # silently leaves those jobs to pile up in Redis and no mail is ever sent.
-  types: "default,account_email,email.send,webhook.deliver"
+  types: "account_email,email.send,webhook.deliver"
   concurrency: 2
   healthPort: 9091
   brpopTimeout: 5
