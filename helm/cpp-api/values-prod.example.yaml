@@ -134,6 +134,7 @@ monitoring:
 
 logging:
   level: info
+  format: json             # structured JSON logs — required for prod log aggregators
 
 server:
   # The REAL concurrency cap for DB-bound work (sync pqxx): in-flight DB calls
