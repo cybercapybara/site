@@ -49,11 +49,11 @@ describe('api client 401→refresh→retry', () => {
 
     // Typed path: response type is inferred from the OpenAPI `paths` tree.
     // The mocked body is shape-agnostic here — we assert the runtime value.
-    const { data, error } = await api.GET('/api/jobs');
+    const { data, error } = await api.GET('/api/v1/jobs');
     expect(error).toBeUndefined();
     expect(data).toEqual({ data: 'after-refresh' });
 
-    expect(calls.map((c) => c.url)).toEqual(['/api/jobs', '/api/auth/refresh', '/api/jobs']);
+    expect(calls.map((c) => c.url)).toEqual(['/api/v1/jobs', '/api/v1/auth/refresh', '/api/v1/jobs']);
     expect(calls[1].init.method).toBe('POST');
   });
 
@@ -63,18 +63,18 @@ describe('api client 401→refresh→retry', () => {
       () => new Response(null, { status: 401 }), // refresh rejected
     ]);
 
-    const { error } = await api.GET('/api/jobs');
+    const { error } = await api.GET('/api/v1/jobs');
     expect(error?.status).toBe(401);
     // No replay after a failed refresh.
-    expect(calls.map((c) => c.url)).toEqual(['/api/jobs', '/api/auth/refresh']);
+    expect(calls.map((c) => c.url)).toEqual(['/api/v1/jobs', '/api/v1/auth/refresh']);
   });
 
   it('never tries to refresh for the credential endpoints (login/register/refresh/logout)', async () => {
     for (const path of [
-      '/api/auth/login',
-      '/api/auth/register',
-      '/api/auth/refresh',
-      '/api/auth/logout',
+      '/api/v1/auth/login',
+      '/api/v1/auth/register',
+      '/api/v1/auth/refresh',
+      '/api/v1/auth/logout',
     ]) {
       calls = [];
       mockFetchSequence([() => jsonResponse(401, { error: 'invalid_credentials' })]);
@@ -96,13 +96,13 @@ describe('api client 401→refresh→retry', () => {
       () => jsonResponse(200, { user: { id: 'u1' } }),        // replayed /me
     ]);
 
-    const { data, error } = await api.GET('/api/auth/me');
+    const { data, error } = await api.GET('/api/v1/auth/me');
     expect(error).toBeUndefined();
     expect(data).toEqual({ user: { id: 'u1' } });
     expect(calls.map((c) => c.url)).toEqual([
-      '/api/auth/me',
-      '/api/auth/refresh',
-      '/api/auth/me',
+      '/api/v1/auth/me',
+      '/api/v1/auth/refresh',
+      '/api/v1/auth/me',
     ]);
   });
 
@@ -110,7 +110,7 @@ describe('api client 401→refresh→retry', () => {
     let refreshes = 0;
     vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
       calls.push({ url: String(url), init });
-      if (String(url) === '/api/auth/refresh') {
+      if (String(url) === '/api/v1/auth/refresh') {
         refreshes += 1;
         // Slow refresh so all three 401 handlers race into tryRefresh().
         await new Promise((r) => setTimeout(r, 20));
@@ -124,9 +124,9 @@ describe('api client 401→refresh→retry', () => {
     }));
 
     const [a, b, c] = await Promise.all([
-      api.GET('/api/jobs'),
-      api.GET('/api/admin/users'),
-      api.GET('/api/auth-adjacent'), // not /api/auth/ prefix — note the dash
+      api.GET('/api/v1/jobs'),
+      api.GET('/api/v1/admin/users'),
+      api.GET('/api/v1/auth-adjacent'), // not /api/auth/ prefix — note the dash
     ]);
     expect(a.error).toBeUndefined();
     expect(b.error).toBeUndefined();
@@ -136,7 +136,7 @@ describe('api client 401→refresh→retry', () => {
 
   it('serializes the body and sets Content-Type for JSON posts', async () => {
     mockFetchSequence([() => jsonResponse(200, { ok: true })]);
-    await api.POST('/api/jobs', { body: { type: 'echo' } });
+    await api.POST('/api/v1/jobs', { body: { type: 'echo' } });
     expect(calls[0].init.body).toBe(JSON.stringify({ type: 'echo' }));
     expect((calls[0].init.headers as Record<string, string>)['Content-Type']).toBe(
       'application/json',
@@ -146,7 +146,7 @@ describe('api client 401→refresh→retry', () => {
 
   it('getJson throws the ApiError on failure', async () => {
     mockFetchSequence([() => jsonResponse(404, { error: 'not_found', status: 404 })]);
-    await expect(api.getJson('/api/auth/me')).rejects.toMatchObject({ status: 404 });
+    await expect(api.getJson('/api/v1/auth/me')).rejects.toMatchObject({ status: 404 });
   });
 
   it('returns the second 401 after a successful refresh — exactly one replay, no loop', async () => {
@@ -156,10 +156,10 @@ describe('api client 401→refresh→retry', () => {
       () => jsonResponse(401, { error: 'missing_token' }), // …but the replay still 401s
     ]);
 
-    const { error } = await api.GET('/api/jobs');
+    const { error } = await api.GET('/api/v1/jobs');
     expect(error?.status).toBe(401);
     // original + refresh + one replay. No second refresh, no infinite loop.
-    expect(calls.map((c) => c.url)).toEqual(['/api/jobs', '/api/auth/refresh', '/api/jobs']);
+    expect(calls.map((c) => c.url)).toEqual(['/api/v1/jobs', '/api/v1/auth/refresh', '/api/v1/jobs']);
   });
 });
 
@@ -172,7 +172,7 @@ describe('api client failure modes', () => {
       }),
     );
 
-    const { data, error, response } = await api.GET('/api/jobs');
+    const { data, error, response } = await api.GET('/api/v1/jobs');
     expect(data).toBeUndefined();
     expect(response).toBeUndefined();
     expect(error).toBeInstanceOf(ApiClientError);
@@ -188,8 +188,8 @@ describe('api client failure modes', () => {
       }),
     );
 
-    await expect(api.getJson('/api/jobs')).rejects.toBeInstanceOf(ApiClientError);
-    await expect(api.getJson('/api/jobs')).rejects.toMatchObject({
+    await expect(api.getJson('/api/v1/jobs')).rejects.toBeInstanceOf(ApiClientError);
+    await expect(api.getJson('/api/v1/jobs')).rejects.toMatchObject({
       status: 0,
       message: 'Network error',
     });
@@ -205,7 +205,7 @@ describe('api client failure modes', () => {
         }),
     ]);
 
-    const { error } = await api.GET('/api/jobs');
+    const { error } = await api.GET('/api/v1/jobs');
     expect(error).toBeInstanceOf(ApiClientError);
     expect(error?.status).toBe(502);
     expect(error?.message).toBe('<html>502 Bad Gateway</html>');
@@ -221,7 +221,7 @@ describe('api client failure modes', () => {
         }),
     ]);
 
-    const { error } = await api.GET('/api/jobs');
+    const { error } = await api.GET('/api/v1/jobs');
     expect(error).toBeInstanceOf(ApiClientError);
     expect(error?.code).toBe('validation_failed');
     expect(error?.fields).toHaveLength(1);

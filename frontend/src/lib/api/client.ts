@@ -190,10 +190,10 @@ let refreshInFlight: Promise<boolean> | null = null;
  * refreshable. Matched as path prefixes so query strings don't matter.
  */
 const NO_REFRESH_PREFIXES = [
-  '/api/auth/login',
-  '/api/auth/register',
-  '/api/auth/refresh',
-  '/api/auth/logout',
+  '/api/v1/auth/login',
+  '/api/v1/auth/register',
+  '/api/v1/auth/refresh',
+  '/api/v1/auth/logout',
 ];
 
 function isRefreshable(path: string): boolean {
@@ -201,7 +201,7 @@ function isRefreshable(path: string): boolean {
 }
 
 function tryRefresh(): Promise<boolean> {
-  refreshInFlight ??= fetch('/api/auth/refresh', {
+  refreshInFlight ??= fetch('/api/v1/auth/refresh', {
     method: 'POST',
     credentials: 'include',
     headers: csrfHeader('POST'),

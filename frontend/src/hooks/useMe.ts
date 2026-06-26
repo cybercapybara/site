@@ -20,7 +20,7 @@ import type { MeResponse } from '@/lib/api/types';
  * @testing-library/react). 401 → null (logged out); anything else throws.
  */
 export async function fetchMe(): Promise<MeResponse['user'] | null> {
-  const { data, error } = await api.GET('/api/auth/me');
+  const { data, error } = await api.GET('/api/v1/auth/me');
   if (error) {
     if (error.status === 401) return null; // no session
     throw error; // network / 5xx — surface as a real error

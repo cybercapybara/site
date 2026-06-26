@@ -21,7 +21,7 @@ export function ChangeEmailPage() {
   } = useForm<FormValues>({ resolver: zodResolver(changeEmailSchema) });
 
   const change = useApiMutation((values: FormValues) =>
-    api.postJson('/api/account/change-email-request', { body: values }),
+    api.postJson('/api/v1/account/change-email-request', { body: values }),
   );
   useErrorToast(change.error);
 

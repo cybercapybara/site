@@ -19,7 +19,7 @@ export function UnconfirmedPage() {
 
   const resend = async () => {
     setError(null);
-    const { error: e } = await api.POST('/api/account/confirm-resend');
+    const { error: e } = await api.POST('/api/v1/account/confirm-resend');
     if (e) {
       setError('Could not resend the confirmation email. Try again later.');
       return;

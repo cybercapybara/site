@@ -64,7 +64,7 @@ export function AdminAuditPage() {
   const { data, isLoading, error, isPlaceholderData, page, setPage, totalPages } = usePagedQuery({
     queryKey: qk.admin.audit(query),
     queryFn: ({ limit, offset }) =>
-      api.getJson('/api/admin/audit', { query: { limit, offset, ...query } }),
+      api.getJson('/api/v1/admin/audit', { query: { limit, offset, ...query } }),
     perPage: PER_PAGE,
   });
 

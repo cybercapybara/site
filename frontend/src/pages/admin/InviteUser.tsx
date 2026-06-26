@@ -27,7 +27,7 @@ export function AdminInviteUserPage() {
   // paged variant is prefix-matched by qk.admin.users()).
   const invite = useApiMutation(
     (values: InviteUserValues) =>
-      api.postJson<InviteResponse>('/api/admin/invite', {
+      api.postJson<InviteResponse>('/api/v1/admin/invite', {
         body: {
           email: values.email,
           first_name: values.first_name || undefined,

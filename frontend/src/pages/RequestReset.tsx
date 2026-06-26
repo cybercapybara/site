@@ -24,7 +24,7 @@ export function RequestResetPage() {
   // confirmation once the request has settled — success or failure — so the
   // UI never reveals whether the address is registered.
   const request = useApiMutation((values: FormValues) =>
-    api.postJson('/api/account/reset-password-request', { body: values }),
+    api.postJson('/api/v1/account/reset-password-request', { body: values }),
   );
   const sent = request.isSuccess || request.isError;
 
