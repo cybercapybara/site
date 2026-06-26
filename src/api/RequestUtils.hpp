@@ -115,18 +115,31 @@ inline std::string normalize_path_for_metrics(const std::string& path) {
         i = j;
     }
 
-    // The account token routes: /api/account/<verb>/<token> where verb is one
+    // Optional API version segment (/api/v<N>/... — see ADR 0006), so the token
+    // routes are detected whether or not a version is present.
+    auto is_version_seg = [](const auto& s) {
+        if (s.size() < 2 || s[0] != 'v')
+            return false;
+        for (size_t k = 1; k < s.size(); ++k)
+            if (s[k] < '0' || s[k] > '9')
+                return false;
+        return true;
+    };
+    const size_t base = (segs.size() >= 2 && is_version_seg(segs[1])) ? 2 : 1;  // index of <resource> after /api[/vN]
+
+    // The account token routes: /api[/vN]/account/<verb>/<token> where verb is one
     // of the token-bearing apply endpoints (the *-request / *-resend variants
-    // are single segments and won't match this 4-segment shape).
-    const bool account_token_route = segs.size() == 4 && segs[0] == "api" && segs[1] == "account" &&
-                                     (segs[2] == "confirm" || segs[2] == "reset-password" ||
-                                      segs[2] == "change-email" || segs[2] == "join-from-invite");
+    // are single segments and won't match this shape).
+    const size_t token_idx = base + 2;
+    const bool account_token_route = segs.size() == base + 3 && segs[0] == "api" && segs[base] == "account" &&
+                                     (segs[base + 1] == "confirm" || segs[base + 1] == "reset-password" ||
+                                      segs[base + 1] == "change-email" || segs[base + 1] == "join-from-invite");
 
     std::string out;
     out.reserve(path.size());
     for (size_t k = 0; k < segs.size(); ++k) {
         out += '/';
-        if (account_token_route && k == 3) {
+        if (account_token_route && k == token_idx) {
             out += ":token";
             continue;
         }

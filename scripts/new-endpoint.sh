@@ -7,9 +7,9 @@
 #                             <ControllerName> <method> <path>
 #
 # Example:
-#   ./scripts/new-endpoint.sh OrdersController Get  /api/orders
-#   ./scripts/new-endpoint.sh --with-test OrdersController Post /api/orders
-#   ./scripts/new-endpoint.sh --with-test OrdersController Get /api/orders/{1}
+#   ./scripts/new-endpoint.sh OrdersController Get  /api/v1/orders
+#   ./scripts/new-endpoint.sh --with-test OrdersController Post /api/v1/orders
+#   ./scripts/new-endpoint.sh --with-test OrdersController Get /api/v1/orders/{1}
 #
 # Flags:
 #   --with-test       Also create tests/api/test_<lower>.cpp with a smoke test.
@@ -51,13 +51,26 @@ done
 
 if [[ ${#ARGS[@]} -lt 3 ]]; then
     echo "Usage: $0 [--with-test] [--no-openapi] <ControllerName> <HttpMethod> <path>" >&2
-    echo "Example: $0 OrdersController Get /api/orders" >&2
+    echo "Example: $0 OrdersController Get /api/v1/orders" >&2
     exit 1
 fi
 
 NAME="${ARGS[0]}"       # e.g. OrdersController
 METHOD_RAW="${ARGS[1]}" # Get | Post | Put | Delete | Patch
-ROUTE="${ARGS[2]}"      # e.g. /api/orders
+ROUTE="${ARGS[2]}"      # e.g. /api/v1/orders
+
+# Enforce the versioning convention (docs/adr/0001-api-versioning.md): an API
+# route must be /api/v<N>/... . Hard-reject (don't auto-prefix — that risks
+# /api/v1/api/v1/orders). Bare infra/probe routes are allowed unversioned.
+case "$ROUTE" in
+/ | /healthz | /ready | /health | /metrics) ;; # infra routes stay unversioned
+/api/v[0-9]*/*) ;;                             # correctly versioned
+/api/*)
+    echo "ERROR: API route '$ROUTE' must be versioned as /api/v<N>/... (e.g. /api/v1/orders)." >&2
+    echo "       See docs/adr/0001-api-versioning.md." >&2
+    exit 2
+    ;;
+esac
 
 # Normalize method to Drogon's enum form (first letter upper, rest lower).
 METHOD="$(printf '%s' "$METHOD_RAW" | tr '[:upper:]' '[:lower:]')"

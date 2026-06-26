@@ -36,7 +36,7 @@ using json = nlohmann::json;
 class AuditController : public HttpController<AuditController> {
 public:
     METHOD_LIST_BEGIN
-    ADD_METHOD_TO(AuditController::listAudit, "/api/admin/audit", Get);
+    ADD_METHOD_TO(AuditController::listAudit, "/api/v1/admin/audit", Get);
     METHOD_LIST_END
 
     void listAudit(const HttpRequestPtr& req, std::function<void(const HttpResponsePtr&)>&& callback) {

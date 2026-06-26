@@ -51,11 +51,11 @@ using json = nlohmann::json;
 class AuthController : public HttpController<AuthController> {
 public:
     METHOD_LIST_BEGIN
-    ADD_METHOD_TO(AuthController::registerUser, "/api/auth/register", Post);
-    ADD_METHOD_TO(AuthController::login, "/api/auth/login", Post);
-    ADD_METHOD_TO(AuthController::logout, "/api/auth/logout", Post);
-    ADD_METHOD_TO(AuthController::refresh, "/api/auth/refresh", Post);
-    ADD_METHOD_TO(AuthController::me, "/api/auth/me", Get);
+    ADD_METHOD_TO(AuthController::registerUser, "/api/v1/auth/register", Post);
+    ADD_METHOD_TO(AuthController::login, "/api/v1/auth/login", Post);
+    ADD_METHOD_TO(AuthController::logout, "/api/v1/auth/logout", Post);
+    ADD_METHOD_TO(AuthController::refresh, "/api/v1/auth/refresh", Post);
+    ADD_METHOD_TO(AuthController::me, "/api/v1/auth/me", Get);
     METHOD_LIST_END
 
     // ---------------------------------------------------------------------
