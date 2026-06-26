@@ -100,4 +100,20 @@ inline std::unordered_set<std::string> split_csv_set(const std::string& csv) {
     return {v.begin(), v.end()};
 }
 
+/// Partially redact an email for logs: keep the first local char and the full
+/// domain, mask the rest ("john.doe@example.com" -> "j***@example.com"). A
+/// single-char (or empty) local part is fully masked so it can't be recovered.
+/// Inputs without '@' are treated as the local part (defensive — not a real
+/// address). Use everywhere an address would otherwise land in a log line; raw
+/// PII in logs is inherited by every fork by default.
+inline std::string mask_email(const std::string& email) {
+    if (email.empty())
+        return email;
+    const auto at = email.find('@');
+    const std::string local = (at == std::string::npos) ? email : email.substr(0, at);
+    const std::string domain = (at == std::string::npos) ? std::string() : email.substr(at);  // includes '@'
+    const std::string masked = (local.size() > 1) ? (std::string(1, local[0]) + "***") : "***";
+    return masked + domain;
+}
+
 }  // namespace Utils::Strings

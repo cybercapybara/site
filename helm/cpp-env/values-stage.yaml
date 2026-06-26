@@ -32,7 +32,7 @@ cpp-worker:
   app:
     baseUrl: https://app.stage.tarassov.me
   worker:
-    types: default,account_email,email.send,webhook.deliver
+    types: account_email,email.send,webhook.deliver
 
 # Stage exposes the dev mailbox + traces (same as demo) for QA walkthroughs.
 jaeger:

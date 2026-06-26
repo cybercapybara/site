@@ -19,6 +19,7 @@ and start writing endpoints instead of reinventing auth, rate limiting, tracing,
 to be forked as a base for real services; breaking changes follow SemVer. Issues
 and PRs welcome (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 
+<!-- init-project:live-demo:start (scripts/init-project.sh --no-demo strips this block) -->
 ## Live demo
 
 A throwaway public demo runs at **[app.demo.tarassov.me](https://app.demo.tarassov.me)** —
@@ -29,9 +30,10 @@ traced in [Jaeger](https://jaeger.demo.tarassov.me). It holds no real data and i
 reset periodically. Stood up with [`scripts/deploy-demo.sh`](scripts/deploy-demo.sh)
 (`helm/cpp-env/values-demo.yaml`).
 
+<!-- init-project:live-demo:end -->
 ## Contents
 
-- [Live demo](#live-demo)
+- [Live demo](#live-demo) <!-- init-project:live-demo:toc -->
 - [Why this template](#why-this-template)
 - [What's in the box](#whats-in-the-box)
 - [Quick start](#quick-start)

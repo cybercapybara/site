@@ -36,9 +36,14 @@ variables:
 # Shared buildx scaffolding: dind + a registry login + a docker-container builder
 # (required for registry cache export). Native single-arch — no QEMU.
 .buildx:
-  image: docker:24.0.7
+  # Pinned by digest (supply-chain): the docker:24.0.7 client + its dind
+  # share ONE multi-arch manifest index, so both pin to the same digest.
+  # Resolved 2026-06-25 via `docker buildx imagetools inspect docker:24.0.7`
+  # (and `...-dind` → identical index digest). Bump tag comments with the digest.
+  image: docker@sha256:52459560108c9833c5ae0ffb998fc2677616ffb7f759177cd8b8b4cf2cb8f157  # docker:24.0.7
   services:
-    - docker:24.0.7-dind
+    - name: docker@sha256:52459560108c9833c5ae0ffb998fc2677616ffb7f759177cd8b8b4cf2cb8f157  # docker:24.0.7-dind
+      alias: docker
   variables:
     DOCKER_TLS_CERTDIR: ""
   timeout: 3h
@@ -416,7 +421,10 @@ test:coverage:
 # no docker-in-docker needed). Independent of the image builds.
 test:frontend:
   stage: test
-  image: node:20-alpine
+  # Pinned by digest (supply-chain): node:20-alpine resolved 2026-06-25 via
+  # `docker buildx imagetools inspect node:20-alpine`. Bump the tag comment
+  # together with the digest when upgrading.
+  image: node@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293  # node:20-alpine
   needs: []
   before_script:
     - cd frontend

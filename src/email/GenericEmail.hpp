@@ -22,6 +22,7 @@
 #include "email/Mailer.hpp"
 #include "jobs/Jobs.hpp"
 #include "utils/Config.hpp"
+#include "utils/Strings.hpp"
 
 namespace Email::SendEmail {
 
@@ -80,15 +81,16 @@ inline void send(const std::string& to,
             if (!html.empty())
                 payload["html"] = html;
             auto job = Jobs::get().submit(kJobType, payload);
-            spdlog::debug("SendEmail: to {} enqueued as job {}", to, job.id);
+            spdlog::debug("SendEmail: to {} enqueued as job {}", Utils::Strings::mask_email(to), job.id);
             return;
         } catch (const std::exception& e) {
-            spdlog::warn("SendEmail: enqueue to {} failed ({}); sending inline", to, e.what());
+            spdlog::warn(
+                "SendEmail: enqueue to {} failed ({}); sending inline", Utils::Strings::mask_email(to), e.what());
         }
     }
     try {
         if (!Email::is_initialized()) {
-            spdlog::warn("SendEmail: mailer not initialized; dropping mail to {}", to);
+            spdlog::warn("SendEmail: mailer not initialized; dropping mail to {}", Utils::Strings::mask_email(to));
             return;
         }
         Email::Message m;
@@ -97,9 +99,9 @@ inline void send(const std::string& to,
         m.text_body = text;
         m.html_body = html;
         if (!Email::get().send(m))
-            spdlog::warn("SendEmail: SMTP refused mail to {}", to);
+            spdlog::warn("SendEmail: SMTP refused mail to {}", Utils::Strings::mask_email(to));
     } catch (const std::exception& e) {
-        spdlog::warn("SendEmail: failed to send to {}: {}", to, e.what());
+        spdlog::warn("SendEmail: failed to send to {}: {}", Utils::Strings::mask_email(to), e.what());
     }
 }
 

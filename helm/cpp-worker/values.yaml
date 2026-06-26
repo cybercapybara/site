@@ -58,6 +58,25 @@ serviceMonitor:
   path: /metrics
 
 # ---------------------------------------------------------------
+# Alerting — PrometheusRule objects with baseline SLO alerts.
+# Requires prometheus-operator CRDs (alertsEnabled=true to render).
+# Mirrors the cpp-api monitoring block; separate so worker alerts can
+# be tuned independently (e.g. different queue thresholds).
+# ---------------------------------------------------------------
+monitoring:
+  alertsEnabled: false
+  alertLabels: {}           # Extra labels applied to every rule (e.g. team)
+  # Selector used on every PromQL expression. Must match how your cluster's
+  # ServiceMonitor / scrape relabel config labels targets.
+  targetSelector: ""
+  thresholds:
+    queueDepth: 100                 # total jobs_queue_depth above this warns
+    dlqDepth: 10                    # total jobs_dlq_depth above this pages
+    dlqPerTypeDepth: 5              # single-type DLQ depth that pages
+    dbPoolSaturation: 0.9           # db_pool_active/size ratio above this warns (90 %)
+    retriesExhaustedPerSec: 0.5     # sustained "gave up" retries per second
+
+# ---------------------------------------------------------------
 # External Secrets Operator — pull secrets from Vault / AWS SSM / GCP SM
 # instead of inlining them in values. When enabled, the static Secret
 # rendered by templates/secret.yaml is suppressed and the Deployment
@@ -92,7 +111,7 @@ worker:
   # MUST include "account_email" (transactional confirm/reset/change-email) and
   # "email.send" (generic ad-hoc email) — a worker that only drains "default"
   # silently leaves those jobs to pile up in Redis and no mail is ever sent.
-  types: "default,account_email,email.send,webhook.deliver"
+  types: "account_email,email.send,webhook.deliver"
   concurrency: 2
   healthPort: 9091
   brpopTimeout: 5
@@ -166,6 +185,7 @@ externalRedis:
 logging:
   level: info
   name: cpp_worker
+  format: json             # text | json (LOG_FORMAT) — json required for log aggregators
   serviceName: cpp_worker_service
 
 # ---------------------------------------------------------------

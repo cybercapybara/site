@@ -35,6 +35,7 @@
 #include "storage/Storage.hpp"
 #include "tasks/Tasks.hpp"
 #include "utils/Config.hpp"
+#include "utils/Pg.hpp"
 #include "utils/Strings.hpp"
 #include "version.hpp"
 
@@ -52,17 +53,7 @@ namespace Core {
  *          libpq key=value-form connection strings and URLs without
  *          userinfo (peer auth, certificate auth) are skipped.
  */
-inline void check_password_safety(const std::string& url) {
-    if (!(url.starts_with("postgresql://") || url.starts_with("postgres://")))
-        return;
-    auto scheme_end = url.find("://");
-    auto authority_end = url.find('@', scheme_end);
-    if (authority_end == std::string::npos)
-        return;
-    auto userinfo = url.substr(scheme_end + 3, authority_end - scheme_end - 3);
-    auto colon = userinfo.find(':');
-    std::string password = (colon == std::string::npos) ? "" : userinfo.substr(colon + 1);
-
+inline void check_password_value(const std::string& password) {
     static const std::unordered_set<std::string> kWeak = {
         "", "postgres", "password", "changeme", "admin", "root", "123456"};
     if (kWeak.count(password) == 0)
@@ -73,13 +64,25 @@ inline void check_password_safety(const std::string& url) {
                                                        std::string(enforce) == "yes");
     const std::string msg =
         "Database password is empty or matches a known-weak default — set DATABASE_PASSWORD "
-        "(or override DATABASE_PRIMARY_URL) to a strong secret. Set "
-        "DATABASE_REQUIRE_SECURE_PASSWORD=true to make this fatal.";
+        "to a strong secret. Set DATABASE_REQUIRE_SECURE_PASSWORD=true to make this fatal.";
     if (require_secure) {
         spdlog::critical(msg);
         throw std::runtime_error("insecure database password rejected by DATABASE_REQUIRE_SECURE_PASSWORD");
     }
     spdlog::warn(msg);
+}
+
+inline void check_password_safety(const std::string& url) {
+    if (!(url.starts_with("postgresql://") || url.starts_with("postgres://")))
+        return;
+    auto scheme_end = url.find("://");
+    auto authority_end = url.find('@', scheme_end);
+    if (authority_end == std::string::npos)
+        return;
+    auto userinfo = url.substr(scheme_end + 3, authority_end - scheme_end - 3);
+    auto colon = userinfo.find(':');
+    std::string password = (colon == std::string::npos) ? "" : userinfo.substr(colon + 1);
+    check_password_value(password);
 }
 
 /**
@@ -183,6 +186,31 @@ private:
                     "Config validation: auth.cookies.secure=false in production — __Host- cookies are "
                     "dropped and session cookies would travel over plaintext. Set AUTH_COOKIE_SECURE=true.");
         }
+        // Production-safety checks the BINARY enforces regardless of which config
+        // profile / env produced the values — so the Helm deploy path can't quietly
+        // bypass them the way it bypasses prod-check.sh / env-check.sh (they only
+        // run against config.production.json, never the gitignored values-prod.yaml).
+        if (is_prod) {
+            if (!cfg.get<bool>("rate_limit.enabled", "RATE_LIMIT_ENABLED", false))
+                spdlog::warn(
+                    "Config validation: rate_limit.enabled=false in production — /api/auth/login is "
+                    "unthrottled (brute-force exposure). Set RATE_LIMIT_ENABLED=true.");
+            else if (cfg.get<bool>("rate_limit.fail_open", "RATE_LIMIT_FAIL_OPEN", true))
+                spdlog::warn(
+                    "Config validation: rate_limit.fail_open=true in production — a Redis outage "
+                    "silently disables the limiter. Set RATE_LIMIT_FAIL_OPEN=false.");
+            if (cfg.get<bool>("docs.enabled", "DOCS_ENABLED", false))
+                spdlog::warn(
+                    "Config validation: docs.enabled=true in production — the API docs UI is publicly "
+                    "exposed. Set DOCS_ENABLED=false.");
+            // CSRF defense-in-depth when cookie auth is on (mutations otherwise lean
+            // on SameSite=Lax alone).
+            if (auth_mode == "jwt" && cfg.get<bool>("auth.cookies.enabled", "AUTH_COOKIES_ENABLED", false) &&
+                !cfg.get<bool>("security.csrf.enabled", "SECURITY_CSRF_ENABLED", false))
+                spdlog::warn(
+                    "Config validation: cookie auth enabled but security.csrf.enabled=false in "
+                    "production — mutations rely on SameSite=Lax only. Set SECURITY_CSRF_ENABLED=true.");
+        }
         spdlog::info("Config validated (env={}, auth_mode={})", env, auth_mode);
     }
 
@@ -224,6 +252,19 @@ private:
             }
             return replicas;
         }
+        // Parts form: a CSV of replica HOSTS, assembled into DSNs with the same
+        // port/user/dbname/password as the primary — so the password isn't baked
+        // into a URL env var (see init_database_). Mirrors DATABASE_REPLICA_URLS.
+        const char* replica_hosts = std::getenv("DATABASE_REPLICA_HOSTS");
+        if (replica_hosts && std::strlen(replica_hosts) > 0) {
+            const int port = cfg.get<int>("database.port", "DATABASE_PORT", 5432);
+            const std::string user = cfg.get<std::string>("database.user", "DATABASE_USER", "app");
+            const std::string name = cfg.get<std::string>("database.name", "DATABASE_NAME", "app");
+            const std::string password = cfg.get<std::string>("database.password", "DATABASE_PASSWORD", "");
+            for (auto& h : Utils::Strings::split_csv_vec(replica_hosts))
+                replicas.push_back(Utils::Pg::make_conninfo(h, port, user, name, password));
+            return replicas;
+        }
         try {
             auto replicas_json = cfg.get_json().at("database").at("replicas");
             for (const auto& r : replicas_json)
@@ -233,8 +274,22 @@ private:
     }
 
     static void init_database_(Config::AppConfig& cfg) {
-        auto primary =
-            cfg.get<std::string>("database.primary", "DATABASE_PRIMARY_URL", "postgresql://localhost:5432/app");
+        // Prefer a full DATABASE_PRIMARY_URL when given (backward compatible).
+        // Otherwise assemble a libpq DSN from discrete parts so the password
+        // lives ONLY in DATABASE_PASSWORD and is never materialized into a URL
+        // env var (which would leak it via `kubectl exec -- env` / crash dumps).
+        auto primary = cfg.get<std::string>("database.primary", "DATABASE_PRIMARY_URL", "");
+        if (primary.empty()) {
+            const std::string host = cfg.get<std::string>("database.host", "DATABASE_HOST", "localhost");
+            const int port = cfg.get<int>("database.port", "DATABASE_PORT", 5432);
+            const std::string user = cfg.get<std::string>("database.user", "DATABASE_USER", "app");
+            const std::string name = cfg.get<std::string>("database.name", "DATABASE_NAME", "app");
+            const std::string password = cfg.get<std::string>("database.password", "DATABASE_PASSWORD", "");
+            check_password_value(password);
+            primary = Utils::Pg::make_conninfo(host, port, user, name, password);
+        } else {
+            check_password_safety(primary);
+        }
         int pool_size = cfg.get<int>("database.pool_size", "DB_POOL_SIZE", 10);
         int acquire_ms = cfg.get<int>("database.acquire_timeout_ms", "DB_ACQUIRE_TIMEOUT_MS", 5000);
         // 0 disables the per-connection PostgreSQL statement_timeout. Default
@@ -242,8 +297,6 @@ private:
         // analytics/migration queries should run on a separate connection
         // string with timeout cleared.
         int stmt_timeout_ms = cfg.get<int>("database.statement_timeout_ms", "DB_STATEMENT_TIMEOUT_MS", 30000);
-
-        check_password_safety(primary);
 
         Database::initialize(primary,
                              read_replicas_(cfg),
@@ -265,10 +318,17 @@ private:
             } catch (...) {}
         });
 
+        // Retry::run sleeps SYNCHRONOUSLY on the calling thread. On the API that
+        // thread is a Drogon IO event loop, so a transient DB blip (failover,
+        // lock spike) parks the loop for up to (max_attempts-1)*max_delay and
+        // stalls UNRELATED requests on the same loop. Keep the request-path
+        // defaults tight (2 attempts, 20→200ms ≈ 0.2s worst case) so a hiccup is
+        // a brief latency bump, not a correlated cliff. The worker runs DB work
+        // off the IO loops — raise DB_RETRY_* there if you want more retries.
         Retry::Policy p;
-        p.max_attempts = cfg.get<int>("database.retry.max_attempts", "DB_RETRY_MAX_ATTEMPTS", 3);
-        p.base_delay_ms = cfg.get<int>("database.retry.base_delay_ms", "DB_RETRY_BASE_DELAY_MS", 100);
-        p.max_delay_ms = cfg.get<int>("database.retry.max_delay_ms", "DB_RETRY_MAX_DELAY_MS", 2000);
+        p.max_attempts = cfg.get<int>("database.retry.max_attempts", "DB_RETRY_MAX_ATTEMPTS", 2);
+        p.base_delay_ms = cfg.get<int>("database.retry.base_delay_ms", "DB_RETRY_BASE_DELAY_MS", 20);
+        p.max_delay_ms = cfg.get<int>("database.retry.max_delay_ms", "DB_RETRY_MAX_DELAY_MS", 200);
         p.jitter = cfg.get<bool>("database.retry.jitter", "DB_RETRY_JITTER", true);
         Database::get().set_retry_policy(p);
     }

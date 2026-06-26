@@ -49,8 +49,21 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
-Build the primary database URL from components.
+Database connection env as DISCRETE parts (host/port/user/name) — the binary
+assembles the libpq DSN in code so the password stays only in DATABASE_PASSWORD
+(never materialized into a URL env var). DATABASE_PASSWORD is emitted separately.
 */}}
-{{- define "cpp-worker.databaseUrl" -}}
-postgresql://{{ .Values.externalDatabase.user }}:$(DATABASE_PASSWORD)@{{ .Values.externalDatabase.host }}:{{ .Values.externalDatabase.port }}/{{ .Values.externalDatabase.name }}
+{{- define "cpp-worker.databaseEnv" -}}
+- name: DATABASE_HOST
+  value: {{ .Values.externalDatabase.host | quote }}
+- name: DATABASE_PORT
+  value: {{ .Values.externalDatabase.port | quote }}
+- name: DATABASE_USER
+  value: {{ .Values.externalDatabase.user | quote }}
+- name: DATABASE_NAME
+  value: {{ .Values.externalDatabase.name | quote }}
+{{- if .Values.externalDatabase.replicaHost }}
+- name: DATABASE_REPLICA_HOSTS
+  value: {{ .Values.externalDatabase.replicaHost | quote }}
+{{- end }}
 {{- end }}

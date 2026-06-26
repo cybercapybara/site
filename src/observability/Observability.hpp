@@ -35,6 +35,7 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
+#include "observability/Trace.hpp"
 #include "utils/Config.hpp"
 
 namespace Observability {
@@ -92,6 +93,28 @@ public:
     }
     std::unique_ptr<custom_flag_formatter> clone() const override {
         return spdlog::details::make_unique<JsonEscapedMessageFlag>();
+    }
+};
+
+// Custom spdlog flag `%@` — emits the current request's trace id (the 2nd field
+// of the thread-local W3C traceparent), or nothing when there's no active trace.
+// Lets EVERY log line (not just the access-log line) be correlated to a trace in
+// Jaeger/Tempo, which the RUNBOOK/README promise.
+class TraceIdFlag : public spdlog::custom_flag_formatter {
+public:
+    void format(const spdlog::details::log_msg&, const std::tm&, spdlog::memory_buf_t& dest) override {
+        const std::string tp = Trace::current_traceparent();  // "00-<trace_id>-<span_id>-<flags>"
+        const auto first = tp.find('-');
+        if (first == std::string::npos)
+            return;
+        const auto second = tp.find('-', first + 1);
+        if (second == std::string::npos)
+            return;
+        const std::string_view tid(tp.data() + first + 1, second - first - 1);
+        dest.append(tid.data(), tid.data() + tid.size());
+    }
+    std::unique_ptr<custom_flag_formatter> clone() const override {
+        return spdlog::details::make_unique<TraceIdFlag>();
     }
 };
 
@@ -153,12 +176,19 @@ public:
             if (!service_name.empty()) {
                 pat += R"(,"service":")" + service_name + R"(")";
             }
-            pat += R"(,"thread":%t,"msg":"%*"})";
+            // trace_id is empty when there's no active trace — still a valid field.
+            pat += R"(,"thread":%t,"trace_id":"%@","msg":"%*"})";
             auto formatter = std::make_unique<spdlog::pattern_formatter>();
-            formatter->add_flag<detail::JsonEscapedMessageFlag>('*').set_pattern(pat);
+            formatter->add_flag<detail::JsonEscapedMessageFlag>('*').add_flag<detail::TraceIdFlag>('@').set_pattern(
+                pat);
+            logger->set_formatter(std::move(formatter));
+        } else {
+            // Text mode: spdlog's default pattern plus a [trace=<id>] tag (empty
+            // when no active trace) so human logs are correlatable too.
+            auto formatter = std::make_unique<spdlog::pattern_formatter>();
+            formatter->add_flag<detail::TraceIdFlag>('@').set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%n] [%l] [trace=%@] %v");
             logger->set_formatter(std::move(formatter));
         }
-        // For "text" mode spdlog keeps its default pattern — no change.
 
         spdlog::register_logger(logger);
         spdlog::set_default_logger(logger);
