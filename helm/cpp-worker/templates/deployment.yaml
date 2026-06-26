@@ -74,7 +74,9 @@ spec:
             timeoutSeconds: 3
             failureThreshold: 3
           env:
-            # Database password — injected from Secret, used to build DATABASE_PRIMARY_URL
+            # Database password — injected from Secret. The binary assembles the
+            # DSN from the discrete DATABASE_* parts below; the password is never
+            # embedded in a URL env var.
             {{- if .Values.externalDatabase.password }}
             - name: DATABASE_PASSWORD
               valueFrom:
@@ -82,13 +84,8 @@ spec:
                   name: {{ include "cpp-worker.fullname" . }}
                   key: database-password
             {{- end }}
-            # Database
-            - name: DATABASE_PRIMARY_URL
-              value: {{ include "cpp-worker.databaseUrl" . | quote }}
-            {{- if .Values.externalDatabase.replicaHost }}
-            - name: DATABASE_REPLICA_URLS
-              value: "postgresql://{{ .Values.externalDatabase.user }}:$(DATABASE_PASSWORD)@{{ .Values.externalDatabase.replicaHost }}:{{ .Values.externalDatabase.port }}/{{ .Values.externalDatabase.name }}"
-            {{- end }}
+            # Database (discrete parts → DSN built in code)
+            {{- include "cpp-worker.databaseEnv" . | nindent 12 }}
             - name: DB_POOL_SIZE
               value: {{ .Values.externalDatabase.poolSize | quote }}
             # Migrations — OFF for the worker. The cpp-api init-container owns

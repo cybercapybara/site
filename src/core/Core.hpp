@@ -35,6 +35,7 @@
 #include "storage/Storage.hpp"
 #include "tasks/Tasks.hpp"
 #include "utils/Config.hpp"
+#include "utils/Pg.hpp"
 #include "utils/Strings.hpp"
 #include "version.hpp"
 
@@ -52,17 +53,7 @@ namespace Core {
  *          libpq key=value-form connection strings and URLs without
  *          userinfo (peer auth, certificate auth) are skipped.
  */
-inline void check_password_safety(const std::string& url) {
-    if (!(url.starts_with("postgresql://") || url.starts_with("postgres://")))
-        return;
-    auto scheme_end = url.find("://");
-    auto authority_end = url.find('@', scheme_end);
-    if (authority_end == std::string::npos)
-        return;
-    auto userinfo = url.substr(scheme_end + 3, authority_end - scheme_end - 3);
-    auto colon = userinfo.find(':');
-    std::string password = (colon == std::string::npos) ? "" : userinfo.substr(colon + 1);
-
+inline void check_password_value(const std::string& password) {
     static const std::unordered_set<std::string> kWeak = {
         "", "postgres", "password", "changeme", "admin", "root", "123456"};
     if (kWeak.count(password) == 0)
@@ -73,13 +64,25 @@ inline void check_password_safety(const std::string& url) {
                                                        std::string(enforce) == "yes");
     const std::string msg =
         "Database password is empty or matches a known-weak default — set DATABASE_PASSWORD "
-        "(or override DATABASE_PRIMARY_URL) to a strong secret. Set "
-        "DATABASE_REQUIRE_SECURE_PASSWORD=true to make this fatal.";
+        "to a strong secret. Set DATABASE_REQUIRE_SECURE_PASSWORD=true to make this fatal.";
     if (require_secure) {
         spdlog::critical(msg);
         throw std::runtime_error("insecure database password rejected by DATABASE_REQUIRE_SECURE_PASSWORD");
     }
     spdlog::warn(msg);
+}
+
+inline void check_password_safety(const std::string& url) {
+    if (!(url.starts_with("postgresql://") || url.starts_with("postgres://")))
+        return;
+    auto scheme_end = url.find("://");
+    auto authority_end = url.find('@', scheme_end);
+    if (authority_end == std::string::npos)
+        return;
+    auto userinfo = url.substr(scheme_end + 3, authority_end - scheme_end - 3);
+    auto colon = userinfo.find(':');
+    std::string password = (colon == std::string::npos) ? "" : userinfo.substr(colon + 1);
+    check_password_value(password);
 }
 
 /**
@@ -249,6 +252,19 @@ private:
             }
             return replicas;
         }
+        // Parts form: a CSV of replica HOSTS, assembled into DSNs with the same
+        // port/user/dbname/password as the primary — so the password isn't baked
+        // into a URL env var (see init_database_). Mirrors DATABASE_REPLICA_URLS.
+        const char* replica_hosts = std::getenv("DATABASE_REPLICA_HOSTS");
+        if (replica_hosts && std::strlen(replica_hosts) > 0) {
+            const int port = cfg.get<int>("database.port", "DATABASE_PORT", 5432);
+            const std::string user = cfg.get<std::string>("database.user", "DATABASE_USER", "app");
+            const std::string name = cfg.get<std::string>("database.name", "DATABASE_NAME", "app");
+            const std::string password = cfg.get<std::string>("database.password", "DATABASE_PASSWORD", "");
+            for (auto& h : Utils::Strings::split_csv_vec(replica_hosts))
+                replicas.push_back(Utils::Pg::make_conninfo(h, port, user, name, password));
+            return replicas;
+        }
         try {
             auto replicas_json = cfg.get_json().at("database").at("replicas");
             for (const auto& r : replicas_json)
@@ -258,8 +274,22 @@ private:
     }
 
     static void init_database_(Config::AppConfig& cfg) {
-        auto primary =
-            cfg.get<std::string>("database.primary", "DATABASE_PRIMARY_URL", "postgresql://localhost:5432/app");
+        // Prefer a full DATABASE_PRIMARY_URL when given (backward compatible).
+        // Otherwise assemble a libpq DSN from discrete parts so the password
+        // lives ONLY in DATABASE_PASSWORD and is never materialized into a URL
+        // env var (which would leak it via `kubectl exec -- env` / crash dumps).
+        auto primary = cfg.get<std::string>("database.primary", "DATABASE_PRIMARY_URL", "");
+        if (primary.empty()) {
+            const std::string host = cfg.get<std::string>("database.host", "DATABASE_HOST", "localhost");
+            const int port = cfg.get<int>("database.port", "DATABASE_PORT", 5432);
+            const std::string user = cfg.get<std::string>("database.user", "DATABASE_USER", "app");
+            const std::string name = cfg.get<std::string>("database.name", "DATABASE_NAME", "app");
+            const std::string password = cfg.get<std::string>("database.password", "DATABASE_PASSWORD", "");
+            check_password_value(password);
+            primary = Utils::Pg::make_conninfo(host, port, user, name, password);
+        } else {
+            check_password_safety(primary);
+        }
         int pool_size = cfg.get<int>("database.pool_size", "DB_POOL_SIZE", 10);
         int acquire_ms = cfg.get<int>("database.acquire_timeout_ms", "DB_ACQUIRE_TIMEOUT_MS", 5000);
         // 0 disables the per-connection PostgreSQL statement_timeout. Default
@@ -267,8 +297,6 @@ private:
         // analytics/migration queries should run on a separate connection
         // string with timeout cleared.
         int stmt_timeout_ms = cfg.get<int>("database.statement_timeout_ms", "DB_STATEMENT_TIMEOUT_MS", 30000);
-
-        check_password_safety(primary);
 
         Database::initialize(primary,
                              read_replicas_(cfg),
