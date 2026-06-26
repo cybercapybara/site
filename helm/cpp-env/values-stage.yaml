@@ -20,15 +20,15 @@ baseDomain: tarassov.me
 
 cpp-api:
   image:
-    tag: v1.3.4
+    tag: v1.4.0
 
 cpp-frontend:
   image:
-    tag: v1.3.4
+    tag: v1.4.0
 
 cpp-worker:
   image:
-    tag: v1.3.4
+    tag: v1.4.0
   app:
     baseUrl: https://app.stage.tarassov.me
   worker:
