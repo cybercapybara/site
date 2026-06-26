@@ -290,10 +290,17 @@ private:
             } catch (...) {}
         });
 
+        // Retry::run sleeps SYNCHRONOUSLY on the calling thread. On the API that
+        // thread is a Drogon IO event loop, so a transient DB blip (failover,
+        // lock spike) parks the loop for up to (max_attempts-1)*max_delay and
+        // stalls UNRELATED requests on the same loop. Keep the request-path
+        // defaults tight (2 attempts, 20→200ms ≈ 0.2s worst case) so a hiccup is
+        // a brief latency bump, not a correlated cliff. The worker runs DB work
+        // off the IO loops — raise DB_RETRY_* there if you want more retries.
         Retry::Policy p;
-        p.max_attempts = cfg.get<int>("database.retry.max_attempts", "DB_RETRY_MAX_ATTEMPTS", 3);
-        p.base_delay_ms = cfg.get<int>("database.retry.base_delay_ms", "DB_RETRY_BASE_DELAY_MS", 100);
-        p.max_delay_ms = cfg.get<int>("database.retry.max_delay_ms", "DB_RETRY_MAX_DELAY_MS", 2000);
+        p.max_attempts = cfg.get<int>("database.retry.max_attempts", "DB_RETRY_MAX_ATTEMPTS", 2);
+        p.base_delay_ms = cfg.get<int>("database.retry.base_delay_ms", "DB_RETRY_BASE_DELAY_MS", 20);
+        p.max_delay_ms = cfg.get<int>("database.retry.max_delay_ms", "DB_RETRY_MAX_DELAY_MS", 200);
         p.jitter = cfg.get<bool>("database.retry.jitter", "DB_RETRY_JITTER", true);
         Database::get().set_retry_policy(p);
     }
