@@ -22,7 +22,7 @@ export function ConfirmChangeEmailPage() {
   const { token = '' } = useParams<{ token: string }>();
 
   const confirm = useApiMutation(
-    () => api.postJson('/api/account/change-email/' + encodeURIComponent(token)),
+    () => api.postJson('/api/v1/account/change-email/' + encodeURIComponent(token)),
     { invalidate: [qk.me()] },
   );
 

@@ -11,6 +11,6 @@ import { qk } from '@/lib/api/queryKeys';
 export function useAdminRoles() {
   return useQuery({
     queryKey: qk.admin.roles(),
-    queryFn: () => api.getJson('/api/admin/roles'),
+    queryFn: () => api.getJson('/api/v1/admin/roles'),
   });
 }

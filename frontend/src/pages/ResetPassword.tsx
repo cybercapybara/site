@@ -22,7 +22,7 @@ export function ResetPasswordPage() {
   } = useForm<FormValues>({ resolver: zodResolver(resetPasswordSchema) });
 
   const reset = useApiMutation((values: FormValues) =>
-    api.postJson('/api/account/reset-password/' + encodeURIComponent(token), {
+    api.postJson('/api/v1/account/reset-password/' + encodeURIComponent(token), {
       body: { new_password: values.new_password },
     }),
   );

@@ -28,9 +28,9 @@ using json = nlohmann::json;
 class ApiKeyController : public HttpController<ApiKeyController> {
 public:
     METHOD_LIST_BEGIN
-    ADD_METHOD_TO(ApiKeyController::list, "/api/account/api-keys", Get);
-    ADD_METHOD_TO(ApiKeyController::create, "/api/account/api-keys", Post);
-    ADD_METHOD_TO(ApiKeyController::remove, "/api/account/api-keys/{1}", Delete);
+    ADD_METHOD_TO(ApiKeyController::list, "/api/v1/account/api-keys", Get);
+    ADD_METHOD_TO(ApiKeyController::create, "/api/v1/account/api-keys", Post);
+    ADD_METHOD_TO(ApiKeyController::remove, "/api/v1/account/api-keys/{1}", Delete);
     METHOD_LIST_END
 
     void list(const HttpRequestPtr& req, std::function<void(const HttpResponsePtr&)>&& callback) {

@@ -17,36 +17,38 @@ namespace {
 using Api::normalize_path_for_metrics;
 
 TEST(RequestUtilsTest, PlainPathUnchanged) {
-    EXPECT_EQ(normalize_path_for_metrics("/api/jobs"), "/api/jobs");
+    EXPECT_EQ(normalize_path_for_metrics("/api/v1/jobs"), "/api/v1/jobs");
     EXPECT_EQ(normalize_path_for_metrics("/"), "/");
     EXPECT_EQ(normalize_path_for_metrics("/healthz"), "/healthz");
 }
 
 TEST(RequestUtilsTest, UuidSegmentRedacted) {
-    EXPECT_EQ(normalize_path_for_metrics("/api/jobs/123e4567-e89b-12d3-a456-426614174000"), "/api/jobs/:id");
-    EXPECT_EQ(normalize_path_for_metrics("/api/admin/users/123e4567-e89b-12d3-a456-426614174000"),
-              "/api/admin/users/:id");
+    EXPECT_EQ(normalize_path_for_metrics("/api/v1/jobs/123e4567-e89b-12d3-a456-426614174000"), "/api/v1/jobs/:id");
+    EXPECT_EQ(normalize_path_for_metrics("/api/v1/admin/users/123e4567-e89b-12d3-a456-426614174000"),
+              "/api/v1/admin/users/:id");
     // UUID mid-path + trailing segment.
-    EXPECT_EQ(normalize_path_for_metrics("/api/jobs/dlq/123e4567-e89b-12d3-a456-426614174000/requeue"),
-              "/api/jobs/dlq/:id/requeue");
+    EXPECT_EQ(normalize_path_for_metrics("/api/v1/jobs/dlq/123e4567-e89b-12d3-a456-426614174000/requeue"),
+              "/api/v1/jobs/dlq/:id/requeue");
 }
 
 TEST(RequestUtilsTest, AccountTokensRedacted) {
-    EXPECT_EQ(normalize_path_for_metrics("/api/account/confirm/eyJhbGciOi.JTV.sig"), "/api/account/confirm/:token");
-    EXPECT_EQ(normalize_path_for_metrics("/api/account/reset-password/some.long.token"),
-              "/api/account/reset-password/:token");
-    EXPECT_EQ(normalize_path_for_metrics("/api/account/change-email/some.long.token"),
-              "/api/account/change-email/:token");
+    EXPECT_EQ(normalize_path_for_metrics("/api/v1/account/confirm/eyJhbGciOi.JTV.sig"),
+              "/api/v1/account/confirm/:token");
+    EXPECT_EQ(normalize_path_for_metrics("/api/v1/account/reset-password/some.long.token"),
+              "/api/v1/account/reset-password/:token");
+    EXPECT_EQ(normalize_path_for_metrics("/api/v1/account/change-email/some.long.token"),
+              "/api/v1/account/change-email/:token");
     // Regression: the invite-redeem token (a 7-day account-takeover secret) must
     // be redacted too — it was leaking into access logs + the metric path label.
-    EXPECT_EQ(normalize_path_for_metrics("/api/account/join-from-invite/eyJhbGciOi.JTV.sig"),
-              "/api/account/join-from-invite/:token");
+    EXPECT_EQ(normalize_path_for_metrics("/api/v1/account/join-from-invite/eyJhbGciOi.JTV.sig"),
+              "/api/v1/account/join-from-invite/:token");
 }
 
 TEST(RequestUtilsTest, RequestVariantsNotMistakenForTokenRoutes) {
     // The *-request / *-resend single-segment routes carry no token.
-    EXPECT_EQ(normalize_path_for_metrics("/api/account/reset-password-request"), "/api/account/reset-password-request");
-    EXPECT_EQ(normalize_path_for_metrics("/api/account/confirm-resend"), "/api/account/confirm-resend");
+    EXPECT_EQ(normalize_path_for_metrics("/api/v1/account/reset-password-request"),
+              "/api/v1/account/reset-password-request");
+    EXPECT_EQ(normalize_path_for_metrics("/api/v1/account/confirm-resend"), "/api/v1/account/confirm-resend");
 }
 
 TEST(RequestUtilsTest, IsValidUuid) {

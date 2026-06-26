@@ -56,6 +56,17 @@ TEST(JobDispatchTest, KnownTypesReflectsRegistration) {
     EXPECT_NE(std::find(types.begin(), types.end(), "dispatch_probe_test"), types.end());
 }
 
+TEST(JobDispatchTest, UnregisteredReportsTypesWithoutHandlers) {
+    auto& d = Jobs::Dispatcher::get();
+    d.register_handler("dispatch_known_test", [](const json&) { return json::object(); });
+    // A WORKER_TYPES entry with no handler must be surfaced (it would silently
+    // dead-letter every job of that type); registered types are filtered out.
+    auto missing = d.unregistered({"dispatch_known_test", "dispatch_absent_test_zzz"});
+    ASSERT_EQ(missing.size(), 1u);
+    EXPECT_EQ(missing[0], "dispatch_absent_test_zzz");
+    EXPECT_TRUE(d.unregistered({"dispatch_known_test"}).empty());
+}
+
 TEST(JobDispatchTest, BuiltinHandlersAreRegistered) {
     // Guards the if-ladder→Dispatcher refactor: dropping/renaming a built-in
     // (esp. account_email) would silently dead-letter real jobs with no other

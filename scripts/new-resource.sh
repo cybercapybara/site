@@ -64,7 +64,11 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # Derivations: lower-case singular, naive plural (append s), table = plural.
 LOWER="$(printf '%s' "$ENTITY" | tr '[:upper:]' '[:lower:]')"
 PLURAL="${LOWER}s"
-ROUTE="/api/${PLURAL}"
+# API version prefix — see docs/adr/0001-api-versioning.md. Bumping the default
+# major is a one-line edit here; routes are emitted correct-by-construction.
+API_VERSION="v1"
+API_PREFIX="/api/${API_VERSION}"
+ROUTE="${API_PREFIX}/${PLURAL}"
 CONTROLLER="${ENTITY}sController"
 
 DOMAIN_FILE="$ROOT/src/domain/${ENTITY}.hpp"

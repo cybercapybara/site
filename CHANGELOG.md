@@ -6,6 +6,43 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.4.0] — 2026-06-26
+
+Fork-readiness hardening + API versioning. Prepares the template to be made
+public and forked into production.
+
+### ⚠ Breaking
+- **All API routes are now versioned under `/api/v1`** (ADR 0006). Clients must
+  call `/api/v1/...`; the bundled frontend moves in the same release. There is
+  no compatibility alias — deploy backend and frontend together. Probe/infra
+  routes (`/healthz`, `/ready`, `/health`, `/metrics`) stay unversioned.
+
+### Added
+- API versioning convention, machine-enforced: `new-resource.sh` derives the
+  route from a single `API_VERSION` var, `new-endpoint.sh` rejects unversioned
+  paths, and `check-routes-registered.sh` lints for them. ADR 0006 documents it.
+- Jobs: exponential retry backoff + a cross-worker visibility-timeout reaper;
+  a startup guard that refuses/​warns on a `WORKER_TYPES` entry with no handler.
+- Health: degraded (non-critical) probes — surfaced in `/health` without failing
+  `/ready`.
+- Observability: `trace_id` on every log line; PrometheusRule alerts for api/worker.
+- Boot-time prod-safety checks in the binary (rate-limit off, docs UI on, CSRF
+  off, weak DB password) that the Helm deploy path can't bypass.
+
+### Changed
+- DB connection string is assembled from discrete env parts so the password is
+  never materialized into a URL env var; request-path DB retry defaults tightened
+  so a transient blip can't stall the IO loop.
+- Migrations support a `-- migrate:no-transaction` marker (autocommit, cleared
+  statement_timeout) for `CREATE INDEX CONCURRENTLY` / large backfills.
+- Helm ships structured JSON logs in prod; frontend drops production sourcemaps;
+  critical CI images pinned by digest; emails masked in logs.
+- `init-project.sh` scrubs the author's demo/infra identifiers on fork.
+
+### Fixed
+- API-key auth throttles the `last_used_at` write (CTE) instead of writing on
+  every request. Numerous review-driven correctness fixes (see PRs).
+
 ## [1.3.4] — 2026-06-25
 
 Hardening and reliability from a full project review.

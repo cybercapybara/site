@@ -14,7 +14,8 @@ data:
       "logging": {
         "name": {{ .Values.logging.name | quote }},
         "file": "logs/worker.log",
-        "level": {{ .Values.logging.level | quote }}
+        "level": {{ .Values.logging.level | quote }},
+        "format": {{ .Values.logging.format | quote }}
       },
       "observability": {
         "metrics_address": "0.0.0.0:{{ .Values.service.metricsPort }}",

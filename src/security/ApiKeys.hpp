@@ -72,10 +72,13 @@ inline bool request_has_key(const drogon::HttpRequestPtr& req) {
  *        absent / unknown / revoked.
  *
  * Runs on PRIMARY (a just-issued key must authenticate immediately — no replica
- * lag) and stamps last_used_at in the same statement. That's one indexed-row
- * write per authenticated request; if your key traffic is very high, throttle
- * the timestamp (e.g. only update when older than a minute) — kept simple here.
+ * lag). last_used_at is stamped THROTTLED: a single CTE always returns the auth
+ * row but only UPDATEs the timestamp when it is older than kLastUsedThrottleSecs,
+ * so a high-QPS key costs a read + a no-op update (0 rows, no WAL) on the common
+ * path instead of an indexed-row write per request.
  */
+inline constexpr int kLastUsedThrottleSecs = 60;
+
 inline std::optional<Security::Auth::AuthPrincipal> authenticate(const drogon::HttpRequestPtr& req) {
     const std::string key = extract_key(req);
     if (key.empty())
@@ -85,12 +88,20 @@ inline std::optional<Security::Auth::AuthPrincipal> authenticate(const drogon::H
     try {
         return Database::get().execute_write([&](auto& txn) -> std::optional<Security::Auth::AuthPrincipal> {
             auto r = txn.exec_params(
-                "UPDATE api_keys k SET last_used_at = now() "
-                "FROM users u, roles r "
-                "WHERE k.key_hash = $1 AND k.revoked_at IS NULL "
-                "  AND u.id = k.user_id AND r.id = u.role_id "
-                "RETURNING k.user_id, r.permissions",
-                key_hash);
+                "WITH authed AS ("
+                "  SELECT k.id, k.user_id, r.permissions "
+                "  FROM api_keys k "
+                "  JOIN users u ON u.id = k.user_id "
+                "  JOIN roles r ON r.id = u.role_id "
+                "  WHERE k.key_hash = $1 AND k.revoked_at IS NULL "
+                "), bumped AS ("
+                "  UPDATE api_keys SET last_used_at = now() "
+                "  WHERE id = (SELECT id FROM authed) "
+                "    AND (last_used_at IS NULL OR last_used_at < now() - make_interval(secs => $2)) "
+                ") "
+                "SELECT user_id, permissions FROM authed",
+                key_hash,
+                kLastUsedThrottleSecs);
             if (r.empty())
                 return std::nullopt;
             const auto user_id = r[0]["user_id"].template as<std::string>();

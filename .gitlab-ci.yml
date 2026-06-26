@@ -36,9 +36,14 @@ variables:
 # Shared buildx scaffolding: dind + a registry login + a docker-container builder
 # (required for registry cache export). Native single-arch — no QEMU.
 .buildx:
-  image: docker:24.0.7
+  # Pinned by digest (supply-chain): the docker:24.0.7 client + its dind
+  # share ONE multi-arch manifest index, so both pin to the same digest.
+  # Resolved 2026-06-25 via `docker buildx imagetools inspect docker:24.0.7`
+  # (and `...-dind` → identical index digest). Bump tag comments with the digest.
+  image: docker@sha256:52459560108c9833c5ae0ffb998fc2677616ffb7f759177cd8b8b4cf2cb8f157  # docker:24.0.7
   services:
-    - docker:24.0.7-dind
+    - name: docker@sha256:52459560108c9833c5ae0ffb998fc2677616ffb7f759177cd8b8b4cf2cb8f157  # docker:24.0.7-dind
+      alias: docker
   variables:
     DOCKER_TLS_CERTDIR: ""
   timeout: 3h
@@ -329,23 +334,23 @@ test:sanitizers:
     - if: $CI_COMMIT_BRANCH == "master"
     - if: $CI_COMMIT_BRANCH == "develop"
 
-# Coverage — build with gcov instrumentation, run all test buckets against live
-# Postgres + Redis (same compose profile as test:integration), emit Cobertura XML
-# for the GitLab coverage badge and an HTML report as artifact.
+# Coverage — build with gcov instrumentation and run all test buckets against
+# live Postgres + Redis, INSIDE the test-runner compose service so it shares
+# app-network and reaches the sidecars by name (exactly like test:integration; a
+# raw `docker run --network host` can't, which silently tanked the number).
 #
-# Infrastructure notes (needs verification on real runner):
-#   • Uses docker-compose --profile test, same as test:integration.
-#   • Runs the coverage-instrumented binary directly inside a dind container;
-#     gcovr is installed in the same container.
-#   • Integration and e2e buckets need Postgres + Redis — they run with || true
-#     (same as `make coverage`) so a missing sidecar degrades coverage numbers
-#     instead of failing the job outright. On CI the sidecars ARE available, so
-#     in practice all three buckets run.
+# Notes:
+#   • Integration + e2e buckets need Postgres + Redis; they run with || true so a
+#     missing sidecar degrades the number instead of failing outright. On CI the
+#     sidecars are up, so all three buckets run.
+#   • No artifacts: the run lives inside the compose-networked container (no host
+#     bind-mount works reliably under dind), so the gate is the in-container
+#     `gcovr --fail-under-line` and the badge comes from the `coverage:` regex
+#     over the job log — NOT a Cobertura/HTML artifact.
 #   • COVERAGE_MIN is passed in; defaults to 40 (matches Makefile).
-#   • gcovr cobertura output is what GitLab reads for the coverage: badge.
 #
-# TODO: verify cobertura path + gcovr version on the actual arm64 runner image
-#       before treating the badge number as authoritative.
+# TODO: confirm gcovr version on the arm64 runner image before treating the
+#       badge number as authoritative.
 test:coverage:
   stage: test
   image: docker:24.0.7
@@ -377,47 +382,35 @@ test:coverage:
         fi
         sleep 1
       done
-    - cd ..
-    # Build a coverage-instrumented image based on the builder layer already
-    # cached in the registry (buildcache-arm64). The coverage preset adds
-    # -O0 -g --coverage; no vcpkg reinstall needed (reuses /app/build/vcpkg_installed).
+    # Coverage build + run INSIDE the test-runner compose service so it shares
+    # the app-network and reaches test-postgres/test-redis by name
+    # (TEST_PG_HOST=test-postgres is baked into the service). A raw
+    # `docker run --network host` can't see the compose services, so every
+    # integration suite fails fast and tanks the number. The coverage preset adds
+    # -O0 -g --coverage. gcovr MUST stay on one line: in a folded YAML scalar,
+    # more-indented continuation lines keep their newline and would each run as a
+    # separate command (the previous exit-127 bug).
     - >
-      docker run --rm
-      --network host
-      -e TEST_PG_HOST=127.0.0.1
-      -e TEST_REDIS_HOST=127.0.0.1
-      -e CI_REQUIRE_INFRA=1
-      -v $CI_PROJECT_DIR/coverage-results:/results
+      docker compose --env-file .env --profile test run --rm
       --entrypoint /bin/bash
-      $TEST_IMAGE -c "
+      -e CI_REQUIRE_INFRA=1
+      test-runner -c "
         apt-get update -qq && apt-get install -y -qq gcovr > /dev/null 2>&1 &&
         cd /app &&
         cmake --preset coverage &&
         cmake --build --preset coverage -j\$(nproc) &&
-        ./build/coverage/cpp_api_template_tests_unit --gtest_color=yes || true &&
-        ./build/coverage/cpp_api_template_tests_integration --gtest_color=yes || true &&
-        ./build/coverage/cpp_api_template_e2e --gtest_color=yes || true &&
-        mkdir -p /results &&
-        gcovr -r . --filter 'src/.*'
-          --html-details /results/index.html
-          --xml /results/coverage.xml
-          --print-summary
-          --fail-under-line ${COVERAGE_MIN}
+        (./build/coverage/cpp_api_template_tests_unit --gtest_color=yes || true) &&
+        (./build/coverage/cpp_api_template_tests_integration --gtest_color=yes || true) &&
+        (./build/coverage/cpp_api_template_e2e --gtest_color=yes || true) &&
+        gcovr -r . --filter 'src/.*' --print-summary --fail-under-line ${COVERAGE_MIN}
       "
   after_script:
     - cd docker && docker compose --env-file .env --profile test down -v || true
   # GitLab parses coverage: regex from the job log to populate the pipeline badge.
-  # gcovr --print-summary emits: "lines: 42.3% (1234 out of 2916)"
+  # gcovr --print-summary emits: "lines: 42.3% (1234 out of 2916)". No artifacts:
+  # the run is inside the compose-networked test-runner (no host bind-mount in
+  # dind), so the gate is the in-container --fail-under-line + the badge regex.
   coverage: '/lines:\s+(\d+\.\d+)%/'
-  artifacts:
-    when: always
-    paths:
-      - coverage-results/
-    reports:
-      coverage_report:
-        coverage_format: cobertura
-        path: coverage-results/coverage.xml
-    expire_in: 1 week
   allow_failure: true  # TODO: remove once coverage job is confirmed stable on runner
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -428,7 +421,10 @@ test:coverage:
 # no docker-in-docker needed). Independent of the image builds.
 test:frontend:
   stage: test
-  image: node:20-alpine
+  # Pinned by digest (supply-chain): node:20-alpine resolved 2026-06-25 via
+  # `docker buildx imagetools inspect node:20-alpine`. Bump the tag comment
+  # together with the digest when upgrading.
+  image: node@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293  # node:20-alpine
   needs: []
   before_script:
     - cd frontend

@@ -50,6 +50,18 @@ public:
         return out;
     }
 
+    /// Of @p subscribed job types, those with NO registered handler. Used at
+    /// worker startup to surface a WORKER_TYPES entry that would silently
+    /// dead-letter every job of that type (a producer/consumer mismatch),
+    /// instead of pretending to subscribe to it.
+    std::vector<std::string> unregistered(const std::vector<std::string>& subscribed) const {
+        std::vector<std::string> out;
+        for (const auto& t : subscribed)
+            if (handlers_.find(t) == handlers_.end())
+                out.push_back(t);
+        return out;
+    }
+
     /// Run the handler for @p job.type. Throws PermanentJobError if no handler
     /// is registered — surfacing a producer/consumer mismatch loudly instead of
     /// faking success, and without burning the retry budget.

@@ -163,9 +163,9 @@ void attach_session(const HttpRequestPtr& req, const SessionCookies& sc) {
 }
 
 SessionCookies register_and_login(const std::string& email, const std::string& password) {
-    auto reg = send(json_post("/api/auth/register", {{"email", email}, {"password", password}}));
+    auto reg = send(json_post("/api/v1/auth/register", {{"email", email}, {"password", password}}));
     EXPECT_EQ(reg->statusCode(), k201Created) << reg->getBody();
-    auto login = send(json_post("/api/auth/login", {{"email", email}, {"password", password}}));
+    auto login = send(json_post("/api/v1/auth/login", {{"email", email}, {"password", password}}));
     EXPECT_EQ(login->statusCode(), k200OK) << login->getBody();
     return cookies_of(login);
 }
@@ -210,7 +210,7 @@ TEST(HttpE2E, NonJsonContentTypeRejectedWith415) {
     REQUIRE_E2E_ENV();
     auto req = HttpRequest::newHttpRequest();
     req->setMethod(Post);
-    req->setPath("/api/auth/login");
+    req->setPath("/api/v1/auth/login");
     req->setBody("email=not-json");
     req->setContentTypeCode(CT_TEXT_PLAIN);
     auto resp = send(req);
@@ -220,7 +220,7 @@ TEST(HttpE2E, NonJsonContentTypeRejectedWith415) {
 TEST(HttpE2E, AuthMiddlewareGuardsNonPublicPaths) {
     REQUIRE_E2E_ENV();
     auto req = HttpRequest::newHttpRequest();
-    req->setPath("/api/jobs");  // not in api.public_paths
+    req->setPath("/api/v1/jobs");  // not in api.public_paths
     auto resp = send(req);
     EXPECT_EQ(resp->statusCode(), k401Unauthorized);
     EXPECT_FALSE(resp->getHeader("www-authenticate").empty());
@@ -235,7 +235,7 @@ TEST(HttpE2E, AccountTokenRoutesArePublic) {
     REQUIRE_E2E_ENV();
     auto req = HttpRequest::newHttpRequest();
     req->setMethod(Post);
-    req->setPath("/api/account/reset-password/not-a-real-token");
+    req->setPath("/api/v1/account/reset-password/not-a-real-token");
     req->setBody(R"({"new_password":"whatever-123"})");
     req->setContentTypeCode(CT_APPLICATION_JSON);  // pass the content-type gate
     auto resp = send(req);
@@ -250,7 +250,7 @@ TEST(HttpE2E, RegisterLoginMeRoundtripOverWire) {
     ASSERT_FALSE(sc.refresh.empty()) << "no refresh cookie on the wire";
 
     auto me = HttpRequest::newHttpRequest();
-    me->setPath("/api/auth/me");
+    me->setPath("/api/v1/auth/me");
     attach_session(me, sc);
     auto resp = send(me);
     ASSERT_EQ(resp->statusCode(), k200OK) << resp->getBody();
@@ -263,7 +263,7 @@ TEST(HttpE2E, RefreshRotatesSession) {
 
     auto refresh = HttpRequest::newHttpRequest();
     refresh->setMethod(Post);
-    refresh->setPath("/api/auth/refresh");
+    refresh->setPath("/api/v1/auth/refresh");
     attach_session(refresh, sc);
     auto resp = send(refresh);
     ASSERT_EQ(resp->statusCode(), k200OK) << resp->getBody();
@@ -279,14 +279,14 @@ TEST(HttpE2E, LogoutRevokesRefreshToken) {
 
     auto logout = HttpRequest::newHttpRequest();
     logout->setMethod(Post);
-    logout->setPath("/api/auth/logout");
+    logout->setPath("/api/v1/auth/logout");
     attach_session(logout, sc);
     ASSERT_EQ(send(logout)->statusCode(), k200OK);
 
     // The old refresh JTI is revoked in Redis — rotation must now fail.
     auto refresh = HttpRequest::newHttpRequest();
     refresh->setMethod(Post);
-    refresh->setPath("/api/auth/refresh");
+    refresh->setPath("/api/v1/auth/refresh");
     attach_session(refresh, sc);
     EXPECT_EQ(send(refresh)->statusCode(), k401Unauthorized);
 }
@@ -295,21 +295,22 @@ TEST(HttpE2E, IdempotencyKeyReplaysResponse) {
     REQUIRE_E2E_ENV();
     const json body = {{"email", "e2e-idem@example.com"}, {"password", "password-e2e-1"}};
 
-    auto first = json_post("/api/auth/register", body);
+    auto first = json_post("/api/v1/auth/register", body);
     first->addHeader("Idempotency-Key", "e2e-key-001");
     auto r1 = send(first);
     ASSERT_EQ(r1->statusCode(), k201Created) << r1->getBody();
 
     // Identical retry: without the middleware this would be 409 email_taken;
     // with it, the cached 201 is replayed.
-    auto second = json_post("/api/auth/register", body);
+    auto second = json_post("/api/v1/auth/register", body);
     second->addHeader("Idempotency-Key", "e2e-key-001");
     auto r2 = send(second);
     EXPECT_EQ(r2->statusCode(), k201Created) << r2->getBody();
     EXPECT_EQ(r2->getHeader("x-idempotent-replayed"), "true");
 
     // Same key + DIFFERENT body → 422 conflict.
-    auto third = json_post("/api/auth/register", {{"email", "e2e-other@example.com"}, {"password", "password-e2e-1"}});
+    auto third =
+        json_post("/api/v1/auth/register", {{"email", "e2e-other@example.com"}, {"password", "password-e2e-1"}});
     third->addHeader("Idempotency-Key", "e2e-key-001");
     EXPECT_EQ(send(third)->statusCode(), k422UnprocessableEntity);
 }
@@ -325,12 +326,12 @@ TEST(HttpE2E, AdminGateChecksPermissionBitmask) {
     const auto user_jwt = Security::Auth::issue_hs256_jwt(user_claims, kSecret);
 
     auto as_admin = HttpRequest::newHttpRequest();
-    as_admin->setPath("/api/admin/users");
+    as_admin->setPath("/api/v1/admin/users");
     as_admin->addHeader("Authorization", "Bearer " + admin_jwt);
     EXPECT_EQ(send(as_admin)->statusCode(), k200OK);
 
     auto as_user = HttpRequest::newHttpRequest();
-    as_user->setPath("/api/admin/users");
+    as_user->setPath("/api/v1/admin/users");
     as_user->addHeader("Authorization", "Bearer " + user_jwt);
     EXPECT_EQ(send(as_user)->statusCode(), k403Forbidden);
 }

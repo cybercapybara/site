@@ -20,19 +20,19 @@ baseDomain: tarassov.me
 
 cpp-api:
   image:
-    tag: v1.3.4
+    tag: v1.4.0
 
 cpp-frontend:
   image:
-    tag: v1.3.4
+    tag: v1.4.0
 
 cpp-worker:
   image:
-    tag: v1.3.4
+    tag: v1.4.0
   app:
     baseUrl: https://app.stage.tarassov.me
   worker:
-    types: default,account_email,email.send,webhook.deliver
+    types: account_email,email.send,webhook.deliver
 
 # Stage exposes the dev mailbox + traces (same as demo) for QA walkthroughs.
 jaeger:
