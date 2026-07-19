@@ -6,8 +6,8 @@ and start writing endpoints instead of reinventing auth, rate limiting, tracing,
 <!-- Live badges point at the canonical repo. init-project.sh rebrands both the
      project name AND the host (pass your domain as the 3rd arg) and then fails
      if any template/author token survived — so a fork won't ship these links. -->
-[![pipeline](https://gitlab.com/tarassov.me/cpp-rapid-rest-template/badges/master/pipeline.svg)](https://gitlab.com/tarassov.me/cpp-rapid-rest-template/-/pipelines)
-[![release](https://gitlab.com/tarassov.me/cpp-rapid-rest-template/-/badges/release.svg)](https://gitlab.com/tarassov.me/cpp-rapid-rest-template/-/releases)
+[![CI](https://github.com/moveeeax/cpp-rapid-rest-template/actions/workflows/ci.yml/badge.svg)](https://github.com/moveeeax/cpp-rapid-rest-template/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/moveeeax/cpp-rapid-rest-template)](https://github.com/moveeeax/cpp-rapid-rest-template/releases)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)
 ![Drogon](https://img.shields.io/badge/Drogon-HTTP%20Framework-green.svg)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-336791.svg)
@@ -121,11 +121,11 @@ methodology and a results template.
   `terminationGracePeriodSeconds`, `ServiceMonitor`, opt-in `PrometheusRule`
   with baseline SLO alerts, opt-in `ExternalSecret` skeleton for Vault /
   AWS / GCP secret stores.
-- GitLab CI: **arm64** Docker build (the GitLab runner is arm64), unit +
-  integration tests, Trivy image scan, clang-format / cppcheck / clang-tidy
-  lints, ASan + UBSan sanitizer build. The GitHub `release.yml` job publishes
-  the **multi-arch** (amd64 + arm64) image on `v*` tags — see the arch note
-  under [Kubernetes](#kubernetes) before deploying to an amd64 cluster.
+- GitHub Actions: build + unit/integration tests on `ubuntu-latest`, gitleaks
+  secret scan, Trivy image scan, clang-format / clang-tidy lints, ASan + UBSan
+  sanitizer build, helm-render and OpenAPI-drift gates. The `release.yml` job
+  publishes the **multi-arch** (amd64 + arm64) image on `v*` tags — see the arch
+  note under [Kubernetes](#kubernetes) before deploying to an amd64 cluster.
 - `CODEOWNERS`, `SECURITY.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, PR templates.
 - Production config profile (`config/config.production.json`) gated by
   `make prod-check` — auth on, cookies secure, limiter fail-closed, docs UI
@@ -202,7 +202,7 @@ dependency layer (falls back to the upstream template cache) so the first build
 is minutes, not ~30.
 
 ```bash
-git clone https://gitlab.com/tarassov.me/cpp-rapid-rest-template.git my-service
+git clone https://github.com/moveeeax/cpp-rapid-rest-template.git my-service
 cd my-service
 
 make doctor        # verify Docker + VM memory before the first (cold) build
@@ -449,11 +449,11 @@ helm upgrade --install api ./helm/cpp-api -n prod -f helm/cpp-api/values-prod.ya
 # repeat for cpp-worker (its datastore/auth MUST match) and cpp-frontend
 ```
 
-**Image architecture — match it to your nodes.** The GitLab pipeline builds and
-pushes an **arm64-only** image (its runner is arm64); only the GitHub
-`release.yml` tag job publishes a **multi-arch** (amd64 + arm64) manifest. If
-your cluster is amd64 (the example overlays' `nodeSelector` assumes it) you must
-deploy an amd64 image — pull from a multi-arch tag, or build for amd64 yourself:
+**Image architecture — match it to your nodes.** CI builds the image only to run
+tests (no publish); the `release.yml` tag job publishes a **multi-arch** (amd64 +
+arm64) manifest on `v*` tags. If your cluster is amd64 (the example overlays'
+`nodeSelector` assumes it) you must deploy an amd64 image — pull from a multi-arch
+tag, or build for amd64 yourself:
 
 ```bash
 docker buildx build --platform linux/amd64 --target runtime \
