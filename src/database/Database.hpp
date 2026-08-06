@@ -84,7 +84,10 @@ public:
     template <typename... Args>
     auto exec_params(const std::string& query, Args&&... args) {
         record_(query);
-        return txn_.exec_params(query, std::forward<Args>(args)...);
+        // pqxx::exec_params is deprecated since libpqxx 7.10 in favour of
+        // exec(query, params). Keep the exec_params name on the proxy — every
+        // repository calls it — and translate here in one place.
+        return txn_.exec(std::string_view{query}, pqxx::params{std::forward<Args>(args)...});
     }
 
     auto exec(const std::string& query) {

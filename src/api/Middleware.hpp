@@ -280,8 +280,8 @@ inline void register_idempotency() {
  *          side. Empty body (no Content-Type at all) is allowed: not every
  *          mutation carries a payload.
  *
- *          Recognized prefixes: application/json, application/*+json. Charset
- *          parameters are stripped before comparison.
+ *          Recognized types: application/json plus any "+json" suffixed
+ *          subtype. Charset parameters are stripped before comparison.
  */
 inline void register_content_type_check() {
     drogon::app().registerSyncAdvice([](const drogon::HttpRequestPtr& req) -> drogon::HttpResponsePtr {

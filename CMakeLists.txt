@@ -32,7 +32,12 @@ add_compile_options(
 
 option(ENABLE_WERROR "Treat warnings as errors (intended for CI)" OFF)
 if(ENABLE_WERROR)
-    add_compile_options(-Werror)
+    # Two GCC middle-end diagnostics stay warnings instead of errors: at -O3
+    # they fire from inlined third-party internals (nlohmann::json via the
+    # PCH, std::variant inside pqxx::params) and escape -isystem suppression
+    # because the optimizer attributes them to the system-header location —
+    # a known false-positive class we can't fix in third-party code.
+    add_compile_options(-Werror -Wno-error=null-dereference -Wno-error=maybe-uninitialized)
 endif()
 
 # Sanitizer support — when ENABLE_SANITIZERS=ON, build with ASan+UBSan

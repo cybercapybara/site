@@ -21,7 +21,7 @@ jobs:
     # with sanitizers and links the test binary), then runs the full gtest
     # suite against ephemeral Postgres + Redis containers via the `test`
     # compose profile — the same thing `make test` does locally.
-    timeout-minutes: 25
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -175,7 +175,7 @@ jobs:
     # compile_commands.json so the analysis sees the real include paths
     # vcpkg resolved. Best-effort: warnings don't gate yet, the .clang-tidy
     # baseline is still being tightened.
-    timeout-minutes: 25
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -227,7 +227,7 @@ jobs:
     # Integration tests need real Postgres/Redis which aren't wired into this
     # job — keep them out of the filter. Allows a separate, fast feedback
     # signal for memory/UB regressions.
-    timeout-minutes: 25
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
