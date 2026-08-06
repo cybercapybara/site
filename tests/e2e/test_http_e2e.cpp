@@ -26,6 +26,7 @@
 #include <drogon/HttpClient.h>
 #include <drogon/drogon.h>
 #include <gtest/gtest.h>
+#include <trantor/net/EventLoopThread.h>
 
 #include <nlohmann/json.hpp>
 
@@ -47,6 +48,23 @@ bool g_env_ok = false;
 
 std::string base_url() {
     return "http://127.0.0.1:" + std::to_string(kPort);
+}
+
+/**
+ * Dedicated event loop for every HttpClient in this binary.
+ *
+ * newHttpClient(url) with no explicit loop falls back to app().getLoop() — a
+ * lazily constructed static EventLoop that binds to whichever thread touches
+ * it first. That races the server thread's app().run(): if the main thread
+ * (client) constructs it first, run() aborts with trantor's "It is forbidden
+ * to run loop on threads other than event-loop thread" FATAL. Keeping clients
+ * on a private loop means the main thread never touches the app loop at all.
+ */
+trantor::EventLoop* client_loop() {
+    static trantor::EventLoopThread th("e2eClient");
+    static const bool started = (th.run(), true);
+    (void)started;
+    return th.getLoop();
 }
 
 /**
@@ -81,7 +99,7 @@ public:
         server_thread_ = std::thread([] { app().run(); });
 
         // Wait until the server actually accepts: poll /healthz.
-        auto client = HttpClient::newHttpClient(base_url());
+        auto client = HttpClient::newHttpClient(base_url(), client_loop());
         for (int i = 0; i < 100; ++i) {
             auto req = HttpRequest::newHttpRequest();
             req->setPath("/healthz");
@@ -118,7 +136,7 @@ private:
 // ---------------------------------------------------------------------------
 
 HttpResponsePtr send(const HttpRequestPtr& req) {
-    auto client = HttpClient::newHttpClient(base_url());
+    auto client = HttpClient::newHttpClient(base_url(), client_loop());
     auto [ok, resp] = client->sendRequest(req, /*timeout=*/5.0);
     EXPECT_EQ(ok, ReqResult::Ok) << "transport error talking to e2e server";
     EXPECT_NE(resp, nullptr);
