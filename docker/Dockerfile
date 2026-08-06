@@ -67,18 +67,28 @@ ENV VCPKG_ROOT=/opt/vcpkg
 ENV PATH="${VCPKG_ROOT}:${PATH}"
 
 # Manifest mode: copy only vcpkg.json so a source-only change doesn't
-# bust this layer. CMake's vcpkg toolchain reads the manifest and
-# installs the locked dependency set during the configure step.
+# bust this layer.
 WORKDIR /app
 COPY vcpkg.json ./
 
-# Copy source code (after manifest, so editing src/ keeps the dep cache warm).
-COPY . .
-
-# Build application — vcpkg manifest install runs as part of cmake configure.
+# Pre-build the whole dependency set in its own layer, BEFORE the sources
+# arrive. This is the ~35-minute part of a cold build; keyed only on
+# vcpkg.json it survives every source-only change — both in the local layer
+# cache and via CI's gha/GHCR cache-from. --x-install-root matches the CMake
+# toolchain default (${CMAKE_BINARY_DIR}/vcpkg_installed), so the configure
+# step below finds everything installed and its manifest install is a no-op.
 # BuildKit cache mounts keep vcpkg source tarballs and built-package archives
 # across builds (and across FAILED builds — without them, one flaky download
 # or compile error discards the whole dependency set with the RUN layer).
+RUN --mount=type=cache,target=/opt/vcpkg/downloads \
+    --mount=type=cache,target=/root/.cache/vcpkg \
+    vcpkg install --x-install-root=/app/build/vcpkg_installed
+
+# Copy source code (after the dep layer, so editing src/ never rebuilds deps).
+COPY . .
+
+# Build application — the configure-time manifest install just validates the
+# already-populated /app/build/vcpkg_installed from the layer above.
 # ENABLE_WERROR=ON activates -Werror for the CI gate (see CMakeLists.txt).
 # Pass --build-arg ENABLE_WERROR=ON from CI; defaults to OFF for local builds.
 ARG ENABLE_WERROR=OFF
