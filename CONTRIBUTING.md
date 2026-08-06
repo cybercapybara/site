@@ -91,20 +91,14 @@ The PR template covers:
 - **Breaking changes** — list them explicitly (config keys, API routes,
   response shapes).
 
-## Two CI pipelines
+## CI pipeline
 
-The repo ships both `.github/workflows/` (GitHub Actions) and `.gitlab-ci.yml`
-(GitLab) so it works on either host. They are kept close but are NOT identical
-— pick the one your host uses; the other is a maintained reference. Current
-intentional differences:
+CI lives in `.github/workflows/` (GitHub Actions): build + tests, Trivy image
+scanning, gitleaks, shellcheck, clang-format/clang-tidy, ASan+UBSan, Spectral
+OpenAPI lint, and the openapi-drift + test-bucket checks. Release images emit
+SBOM + provenance (`release.yml`).
 
-- **GitLab** additionally runs `cppcheck` and a Spectral OpenAPI lint.
-- Both now run Trivy image scanning, gitleaks, shellcheck, and the
-  openapi-drift + test-bucket checks.
-- Both emit SBOM + provenance on release images.
-
-When you change a CI gate, change it in **both** files (or note here why it's
-intentionally one-sided).
+When you change a CI gate, update the gate list in `CLAUDE.md` in the same PR.
 
 ## Release
 

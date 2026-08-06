@@ -87,9 +87,9 @@ jobs:
           severity: warning
 
       - name: Shellcheck (docker)
-        # docker/*.sh (Postgres replica setup) lives outside ./scripts and was
-        # previously skipped here, while GitLab CI scanned it. Second invocation
-        # keeps the scandir scoping (the action only accepts one scandir).
+        # docker/*.sh (Postgres replica setup) lives outside ./scripts. Second
+        # invocation keeps the scandir scoping (the action only accepts one
+        # scandir).
         uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38  # 2.0.0
         with:
           scandir: ./docker
@@ -201,10 +201,8 @@ jobs:
 
       - name: Run clang-tidy inside builder
         # continue-on-error: ratchet — flip to false once baseline is clean.
-        # Checks come from .clang-tidy in the repo root (mounted read-only).
-        # GitLab CI counterpart previously had -checks=-* (disabled ALL checks);
-        # that flag is now removed there too. Both jobs now use the .clang-tidy
-        # config (bugprone-*, performance-*, portability-*, clang-analyzer-*).
+        # Checks come from .clang-tidy in the repo root (mounted read-only):
+        # bugprone-*, performance-*, portability-*, clang-analyzer-*.
         continue-on-error: true  # TODO: flip to false once baseline is clean
         run: |
           docker run --rm \
