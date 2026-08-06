@@ -38,7 +38,9 @@ jobs:
           load: true
           tags: cpp-api-template:builder
           build-args: ENABLE_WERROR=ON
-          cache-from: type=gha
+          cache-from: |
+            type=gha
+            type=registry,ref=ghcr.io/${{ github.repository }}/builder:cache
           cache-to: type=gha,mode=max
 
       - name: Run full test suite
@@ -192,7 +194,9 @@ jobs:
           load: true
           tags: cpp-api-template:builder
           build-args: ENABLE_WERROR=ON
-          cache-from: type=gha
+          cache-from: |
+            type=gha
+            type=registry,ref=ghcr.io/${{ github.repository }}/builder:cache
           cache-to: type=gha,mode=max
 
       - name: Run clang-tidy inside builder
@@ -244,7 +248,9 @@ jobs:
           load: true
           tags: cpp-api-template:builder
           build-args: ENABLE_WERROR=ON
-          cache-from: type=gha
+          cache-from: |
+            type=gha
+            type=registry,ref=ghcr.io/${{ github.repository }}/builder:cache
           cache-to: type=gha,mode=max
 
       - name: Build & run unit tests with ASan + UBSan
@@ -265,5 +271,52 @@ jobs:
                   ASAN_OPTIONS=halt_on_error=1:detect_leaks=1 \
                   UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
                   ./build-san/cpp_api_template_tests_unit \
+                      --gtest_color=yes
+              "
+
+  tsan:
+    runs-on: ubuntu-latest
+    # ThreadSanitizer over the unit-test bucket. The codebase leans on inline
+    # singletons + atomics (ADR 0004) — exactly where races hide. Kept apart
+    # from the ASan job: TSan can't share a process with ASan.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3.12.0
+
+      - name: Build builder image
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25  # v5.4.0
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: builder
+          push: false
+          load: true
+          tags: cpp-api-template:builder
+          build-args: ENABLE_WERROR=ON
+          cache-from: |
+            type=gha
+            type=registry,ref=ghcr.io/${{ github.repository }}/builder:cache
+          cache-to: type=gha,mode=max
+
+      - name: Build & run unit tests with TSan
+        run: |
+          docker run --rm \
+              --entrypoint /bin/bash \
+              cpp-api-template:builder -c "
+                  set -e
+                  cd /app
+                  rm -rf build-tsan
+                  cmake -B build-tsan \
+                      -G Ninja \
+                      -DCMAKE_BUILD_TYPE=Debug \
+                      -DENABLE_TSAN=ON \
+                      -DCMAKE_TOOLCHAIN_FILE=/opt/vcpkg/scripts/buildsystems/vcpkg.cmake \
+                      -DVCPKG_INSTALLED_DIR=/app/build/vcpkg_installed
+                  cmake --build build-tsan -j\$(nproc) --target cpp_api_template_tests_unit
+                  TSAN_OPTIONS=halt_on_error=1:second_deadlock_stack=1 \
+                  ./build-tsan/cpp_api_template_tests_unit \
                       --gtest_color=yes
               "

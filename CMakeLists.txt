@@ -55,6 +55,22 @@ if(ENABLE_SANITIZERS)
     add_link_options(-fsanitize=address,undefined)
 endif()
 
+# ThreadSanitizer — mutually exclusive with ASan/UBSan (they can't share a
+# process). Used by the CI `tsan` job over the unit-test bucket.
+option(ENABLE_TSAN "Build with ThreadSanitizer" OFF)
+if(ENABLE_TSAN)
+    if(ENABLE_SANITIZERS)
+        message(FATAL_ERROR "ENABLE_TSAN and ENABLE_SANITIZERS are mutually exclusive")
+    endif()
+    message(STATUS "Sanitizer enabled: thread")
+    add_compile_options(
+        -fsanitize=thread
+        -fno-omit-frame-pointer
+        -O1
+        -g)
+    add_link_options(-fsanitize=thread)
+endif()
+
 # Coverage instrumentation — enables gcov-compatible counters across the
 # whole project so `make coverage` (gcovr/lcov) can produce an HTML report.
 # Implies Debug-ish build (no -O3, with -g). Use the `coverage` preset.
