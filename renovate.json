@@ -9,6 +9,7 @@
   "timezone": "Europe/Moscow",
   "schedule": ["before 6am on monday"],
   "prConcurrentLimit": 5,
+  "dependencyDashboard": true,
   "packageRules": [
     {
       "description": "Auto-merge patch updates when CI is green",
@@ -21,6 +22,27 @@
       "matchUpdateTypes": ["major"],
       "automerge": false,
       "labels": ["infra-major"]
+    },
+    {
+      "description": "GitHub Actions minors auto-merge after a week of soak",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor"],
+      "minimumReleaseAge": "7 days",
+      "automerge": true
+    },
+    {
+      "description": "npm devDependencies minors auto-merge after a week of soak",
+      "matchManagers": ["npm"],
+      "matchDepTypes": ["devDependencies"],
+      "matchUpdateTypes": ["minor"],
+      "minimumReleaseAge": "7 days",
+      "automerge": true
+    },
+    {
+      "description": "vcpkg baseline bump rebuilds the whole dependency world — never automerge (must stay last: later rules win)",
+      "matchDepNames": ["microsoft/vcpkg"],
+      "automerge": false,
+      "labels": ["needs-human"]
     }
   ],
   "customManagers": [
