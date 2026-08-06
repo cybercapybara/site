@@ -8,7 +8,7 @@ REGISTRY     ?= docker.io/library
 # not a target. Start conservative; raise it once you've measured your real
 # number (run `make coverage` and read the printed summary). Override per-run:
 # `make coverage COVERAGE_MIN=55`.
-COVERAGE_MIN ?= 40
+COVERAGE_MIN ?= 54
 
 IMAGE     := $(REGISTRY)/$(PROJECT_NAME)
 GIT_SHA   := $(shell git rev-parse --short HEAD)

@@ -72,6 +72,9 @@ Types: `feat`, `fix`, `refactor`, `perf`, `docs`, `test`, `build`, `ci`,
   skip themselves when `full_init` is false.
 - Failing a new test is a blocker; flaky tests must be either fixed, marked
   `DISABLED_`, or filed as an issue.
+- Coverage floor (`COVERAGE_MIN` in the Makefile) is a ratchet: it only goes
+  up. When real coverage climbs, bump the floor to (actual − 3–5 pp) in the
+  same PR. Never lower it to make a PR pass.
 
 ## Security
 
