@@ -37,6 +37,12 @@ check_wrk_errors() {
     fi
 }
 
+# The app container runs as uid 1000 (appuser) and bind-mounts ../logs from
+# the checkout; on Linux CI runners the checkout belongs to a different uid,
+# so without this the app dies on "logs/app.log: Permission denied".
+# Docker Desktop masks the mismatch locally, which is why dry runs pass.
+mkdir -p logs && chmod a+w logs
+
 # 1) wrk runs via the existing harness. bench.sh restarts the app with the
 #    baseline config and waits for /ready itself.
 ./scripts/bench.sh baseline /healthz | tee "$OUT_DIR/wrk-healthz.txt"
