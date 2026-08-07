@@ -16,7 +16,7 @@ your own deployment.
 
 | Metric | How |
 |---|---|
-| Latency p50 / p99 / p99.9 | `make bench` (wrk) against `/healthz` (no DB) and `/api/jobs` (DB path) |
+| Latency p50 / p99 / p99.9 | `make bench` (wrk) against `/healthz` (no DB) and `/api/v1/jobs` (DB path) |
 | Throughput (req/s) | same wrk run |
 | Runtime image size | `docker build --target runtime` then `docker images` (the slim runtime stage, **not** the builder/test image) |
 | Idle / under-load RSS | `docker stats` locally, or `kubectl top pod` on a cluster |
@@ -43,10 +43,25 @@ make up                          # bring up app + Postgres + Redis
 make bench                       # all presets, default endpoint
 # or target one preset / endpoint / wrk args:
 ./scripts/bench.sh baseline /healthz
-./scripts/bench.sh all /api/jobs -c100 -d10s
+./scripts/bench.sh all /api/v1/jobs -c100 -d10s
 ```
 
 Environment overrides: `WRK_THREADS`, `WRK_CONNS`, `WRK_DURATION`, `APP_URL`.
+
+## Continuous benchmarks
+
+A nightly workflow (`.github/workflows/bench-nightly.yml`) runs the `baseline`
+preset on master — wrk against `/healthz` and `/api/v1/jobs` — plus three
+low-noise footprint metrics (runtime image size, cold start to `/ready`, idle
+RSS), and appends every point to a public trend:
+
+**<https://moveeeax.github.io/cpp-rapid-rest-template/dev/bench/>**
+
+Read it as a **trend**, not as absolute numbers: GitHub shared runners are
+noisy (±10–20% between nights is normal). A regression above 30% against the
+previous point posts an alert commit comment automatically; no PR is ever
+blocked by benchmarks. For absolute numbers on your hardware, run
+`make bench` as described above.
 
 ## Methodology notes
 
@@ -65,7 +80,7 @@ Hardware: _CPU / cores / RAM_ — commit: _short SHA_
 | Preset | Endpoint | req/s | p50 | p99 | p99.9 |
 |---|---|---|---|---|---|
 | baseline | /healthz | | | | |
-| baseline | /api/jobs | | | | |
+| baseline | /api/v1/jobs | | | | |
 | max | /healthz | | | | |
 
 Footprint: runtime image _MB_ · idle RSS _MB_ · under-load RSS _MB_ · cold start _ms_

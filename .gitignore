@@ -143,3 +143,6 @@ helm/cpp-env/.demo-secrets.env
 
 # Local file-storage backend (Storage::LocalStorage) — never commit uploads
 data/uploads/
+
+# Local dry-run benchmark output (scripts/bench-ci.sh OUT_DIR default)
+bench-out/

@@ -463,11 +463,11 @@ seed:              ## Apply optional seed fixtures from migrations/seeds/*.sql (
 
 # ── Benchmark targets ────────────────────────────────────────────
 
-bench:             ## Run benchmark with a preset: make bench P=baseline E=/api/jobs
-	./scripts/bench.sh $(or $(P),baseline) $(or $(E),/api/jobs)
+bench:             ## Run benchmark with a preset: make bench P=baseline E=/api/v1/jobs
+	./scripts/bench.sh $(or $(P),baseline) $(or $(E),/api/v1/jobs)
 
-bench-all:         ## Run all benchmark presets against an endpoint: make bench-all E=/api/jobs
-	./scripts/bench.sh all $(or $(E),/api/jobs)
+bench-all:         ## Run all benchmark presets against an endpoint: make bench-all E=/api/v1/jobs
+	./scripts/bench.sh all $(or $(E),/api/v1/jobs)
 
 # ── Image targets ───────────────────────────────────────────────
 

@@ -1,0 +1,91 @@
+# Nightly benchmark trend on master. Shared-runner numbers are NOISY — this
+# workflow tracks trends and alerts on >30% regressions; it never gates PRs.
+# Absolute numbers: run `make bench` on your own hardware (docs/BENCHMARKS.md).
+name: bench-nightly
+
+on:
+  schedule:
+    - cron: '20 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # push data points to gh-pages
+
+concurrency:
+  group: bench-nightly
+  cancel-in-progress: false
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # workflow_dispatch from a non-master branch must not pollute the master
+    # trend — the chart and alerts are only meaningful for master history.
+    if: github.ref == 'refs/heads/master'
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3.12.0
+
+      - name: Build runtime image (dep layer from cache)
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25  # v5.4.0
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: runtime
+          load: true
+          tags: cpp-rapid-rest-template:bench
+          cache-from: |
+            type=gha
+            type=registry,ref=ghcr.io/${{ github.repository }}/builder:cache
+
+      - name: Install wrk and jq
+        run: sudo apt-get update && sudo apt-get install -y wrk jq
+
+      - name: Run benchmarks
+        env:
+          BENCH_IMAGE: cpp-rapid-rest-template:bench
+        run: ./scripts/bench-ci.sh
+
+      - name: Publish throughput trend
+        uses: benchmark-action/github-action-benchmark@52576c92bccf6ac60c8223ec7eb2565637cae9ba  # v1
+        with:
+          name: Throughput
+          tool: customBiggerIsBetter
+          output-file-path: bench-out/bench-bigger.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          alert-threshold: '130%'
+          comment-on-alert: true
+          fail-on-alert: false
+
+      - name: Publish latency and footprint trend
+        uses: benchmark-action/github-action-benchmark@52576c92bccf6ac60c8223ec7eb2565637cae9ba  # v1
+        with:
+          name: Latency & footprint
+          tool: customSmallerIsBetter
+          output-file-path: bench-out/bench-smaller.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          alert-threshold: '130%'
+          comment-on-alert: true
+          fail-on-alert: false
+
+      - name: Dump container logs on failure
+        if: failure()
+        run: |
+          docker compose -f docker/docker-compose.yml --env-file docker/.env logs --tail 50 app || true
+          docker compose -f docker/docker-compose.yml --env-file docker/.env logs --tail 50 postgres || true
+          docker compose -f docker/docker-compose.yml --env-file docker/.env logs --tail 50 redis || true
+
+      - name: Upload bench output
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: bench-out
+          path: bench-out/
+          if-no-files-found: ignore
+
+      - name: Tear down compose stack
+        if: always()
+        run: make down || true
