@@ -6,6 +6,41 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.5.0] — 2026-08-08
+
+Content module — an optional posts/blog subsystem backported from a
+production fork, plus CI/infra hardening accumulated since 1.4.0.
+
+### Added
+- **Content module** behind `content.enabled` (default **off**, env
+  `CONTENT_ENABLED`, wired through Helm/compose/docs): posts with admin CRUD
+  (`/api/v1/posts*`) and HMAC preview tokens; public JSON feed
+  (`/api/v1/public/posts*`); articles served as raw Markdown at
+  `GET /posts/{slug}` (drafts via `?preview=`); dynamic `/sitemap.xml`
+  (root-only degrade when the module is off); admin uploads API with local
+  and S3 (SigV4) storage backends and public `/uploads/*` serving
+  (posts/-prefixed, extension + magic-byte validated). New public routes ride
+  the strict rate-limit tier. SPA gains Posts and Media tiles on the
+  `/admin` dashboard. Migration `006_add_posts.sql`.
+- Nightly benchmark trend: `bench-nightly.yml` publishes wrk + footprint
+  series to gh-pages with >30% regression alerts (trend-only, never gates
+  PRs); README badge and BENCHMARKS.md section.
+- `autofix.yml` — dispatchable clang-format + OpenAPI TS schema regeneration
+  that pushes the fix commit back to the branch.
+
+### Fixed
+- e2e harness startup race: HTTP clients now run on a dedicated event loop
+  instead of racing `app().run()` for the lazily-bound framework loop.
+- Stale pre-`/api/v1` `/api/jobs` references in bench harness defaults,
+  README examples and Makefile help (the old default benchmarked a 404).
+
+### Changed
+- Docker build: vcpkg dependencies compile in their own layer before
+  `COPY . .` — source-only changes no longer pay the ~35-minute cold
+  dependency build in CI or locally.
+- CI reads the GHCR builder cache as a fallback and gains a ThreadSanitizer
+  job; coverage floor raised to 54% with a documented ratchet rule.
+
 ## [1.4.0] — 2026-06-26
 
 Fork-readiness hardening + API versioning. Prepares the template to be made
