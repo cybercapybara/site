@@ -50,7 +50,7 @@ services:
     # Default: pull the public image GitLab CI builds on master. `make up-*`
     # does `pull` (no local build). To build locally instead use `make up-build`
     # (or `docker compose ... up --build`), which uses the build: block below.
-    image: ${APP_IMAGE:-resert/cpp-rapid-rest-template:latest}
+    image: ${APP_IMAGE:-ghcr.io/moveeeax/cpp-rapid-rest-template:latest}
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -168,7 +168,7 @@ services:
 
   # Background job worker
   worker:
-    image: ${WORKER_IMAGE:-resert/cpp-rapid-rest-template-worker:latest}
+    image: ${WORKER_IMAGE:-ghcr.io/moveeeax/cpp-rapid-rest-template-worker:latest}
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -556,7 +556,7 @@ services:
   # Opt-in via profile `with-frontend` so plain `make up` stays
   # backend-only (faster cold start, no Node toolchain pulled).
   frontend:
-    image: ${FRONTEND_IMAGE:-resert/cpp-rapid-rest-template-frontend:latest}
+    image: ${FRONTEND_IMAGE:-ghcr.io/moveeeax/cpp-rapid-rest-template-frontend:latest}
     build:
       context: ..
       dockerfile: frontend/Dockerfile

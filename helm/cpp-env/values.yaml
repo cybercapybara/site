@@ -72,7 +72,7 @@ cpp-api:
   fullnameOverride: api
   replicaCount: 1
   image:
-    repository: resert/cpp-rapid-rest-template
+    repository: ghcr.io/moveeeax/cpp-rapid-rest-template
     tag: "v1.4.0"
     pullPolicy: Always
   nodeSelector:
@@ -132,7 +132,7 @@ cpp-worker:
   fullnameOverride: worker
   replicaCount: 1
   image:
-    repository: resert/cpp-rapid-rest-template-worker
+    repository: ghcr.io/moveeeax/cpp-rapid-rest-template-worker
     tag: "v1.4.0"
     pullPolicy: Always
   nodeSelector:
@@ -187,7 +187,7 @@ cpp-frontend:
   fullnameOverride: web
   replicaCount: 1
   image:
-    repository: resert/cpp-rapid-rest-template-frontend
+    repository: ghcr.io/moveeeax/cpp-rapid-rest-template-frontend
     tag: "v1.4.0"
     pullPolicy: Always
   nodeSelector:

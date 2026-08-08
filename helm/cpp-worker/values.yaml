@@ -5,7 +5,7 @@ replicaCount: 1
 
 image:
   # The worker image, NOT the API one — Makefile pushes it as <name>-worker.
-  repository: resert/cpp-rapid-rest-template-worker
+  repository: ghcr.io/moveeeax/cpp-rapid-rest-template-worker
   tag: ""  # Defaults to chart appVersion
   pullPolicy: IfNotPresent
 

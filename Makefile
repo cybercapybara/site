@@ -18,7 +18,7 @@ GHCR_ORG  ?= resert
 GHCR_REPO := ghcr.io/$(GHCR_ORG)/$(PROJECT_NAME)
 # Canonical upstream template cache — a fresh fork's own GHCR is empty until its
 # CI runs, so `make warm-cache` falls back here to skip the first cold build.
-UPSTREAM_GHCR ?= ghcr.io/resert/cpp-rapid-rest-template
+UPSTREAM_GHCR ?= ghcr.io/moveeeax/cpp-rapid-rest-template
 
 # Prefer the Compose v2 plugin (`docker compose`) when present; fall back to
 # the standalone v1 binary. CI images ship only the plugin, older dev

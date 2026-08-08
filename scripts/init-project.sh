@@ -72,7 +72,7 @@ PROJECT_NAME="${ARGS[0]}"
 
 # Registry / namespace for the published images. Take it as the 2nd arg, OR —
 # so a forker can't silently inherit the template author's namespace (the
-# hardcoded resert/... in CI, compose, release.yml) — ASK for it interactively
+# hardcoded ghcr.io/moveeeax/... in CI, compose, release.yml) — ASK for it interactively
 # when omitted. Falls back to the default only non-interactively (CI / dry-run).
 if [[ ${#ARGS[@]} -ge 2 ]]; then
     REGISTRY="${ARGS[1]}"
@@ -183,19 +183,19 @@ echo "==> Found ${#FILES[@]} files to process"
 
 declare -a PATTERNS=(
     # 1. Inconsistent helm image ref (if present)
-    "s|resert/cpp-rapid-rest-app|${REGISTRY}/${PROJECT_NAME}|g"
+    "s|ghcr.io/moveeeax/cpp-rapid-rest-app|${REGISTRY}/${PROJECT_NAME}|g"
     # 2. CI image name
-    "s|resert/cpp-rapid-rest-template|${REGISTRY}/${PROJECT_NAME}|g"
+    "s|ghcr.io/moveeeax/cpp-rapid-rest-template|${REGISTRY}/${PROJECT_NAME}|g"
     # 2b. GHCR builder-cache namespace (builder-cache.yml, Makefile GHCR default).
     #     Runs BEFORE the broad bare-owner rule (2a) below — otherwise 2a's
-    #     `resert/` → placeholder rewrite would eat the `resert` inside a
-    #     `ghcr.io/resert/…` URL first and leave this a no-op.
-    "s|ghcr.io/resert|ghcr.io/${REGISTRY_ORG}|g"
+    #     `moveeeax/` → placeholder rewrite would eat the owner inside a
+    #     `ghcr.io/moveeeax/…` URL first and leave this a no-op.
+    "s|ghcr.io/moveeeax|ghcr.io/${REGISTRY_ORG}|g"
     # 2a. Any other reference to the author's Docker Hub namespace (e.g. the
     #     `resert/…` prose in release.yml). Runs AFTER the specific image refs
     #     above so those rewrite to the fork's full ref first; this only mops up
     #     the bare owner so a fork can't inherit it.
-    "s|resert/|your-registry/your-project/|g"
+    "s|moveeeax/|your-registry/your-project/|g"
     # 3. Repo-level references
     "s|cpp-rapid-rest-template|${PROJECT_NAME}|g"
     # 4. CMake project name, binary names, Dockerfile

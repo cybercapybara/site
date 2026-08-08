@@ -4,7 +4,7 @@
 replicaCount: 1
 
 image:
-  repository: resert/cpp-rapid-rest-template
+  repository: ghcr.io/moveeeax/cpp-rapid-rest-template
   tag: ""  # Defaults to chart appVersion
   pullPolicy: IfNotPresent
 
