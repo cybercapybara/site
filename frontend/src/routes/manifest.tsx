@@ -44,6 +44,12 @@ const AdminJobsPage = lazy(() =>
 const AdminAuditPage = lazy(() =>
   import('@/pages/admin/Audit').then((m) => ({ default: m.AdminAuditPage })),
 );
+const AdminPostsPage = lazy(() =>
+  import('@/pages/admin/Posts').then((m) => ({ default: m.AdminPostsPage })),
+);
+const AdminMediaPage = lazy(() =>
+  import('@/pages/admin/Media').then((m) => ({ default: m.AdminMediaPage })),
+);
 
 /**
  * Single routes manifest — THE source of truth for both:
@@ -145,6 +151,8 @@ export const routes: RouteEntry[] = [
     navLabel: 'Audit',
     navIcon: ScrollText,
   },
+  { path: '/admin/posts', element: <AdminPostsPage />, guard: 'admin' },
+  { path: '/admin/media', element: <AdminMediaPage />, guard: 'admin' },
 ];
 
 /** The permission a guard implies, for nav-link filtering in Nav.tsx. */

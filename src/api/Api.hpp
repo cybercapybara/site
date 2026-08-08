@@ -24,9 +24,12 @@
 #include "api/ApiKeyController.hpp"
 #include "api/AuditController.hpp"
 #include "api/AuthController.hpp"
+#include "api/ContentPagesController.hpp"
 #include "api/HealthController.hpp"
 #include "api/JobsController.hpp"
 #include "api/Middleware.hpp"
+#include "api/PostsController.hpp"
+#include "api/UploadController.hpp"
 
 namespace Api {
 

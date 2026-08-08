@@ -64,6 +64,20 @@ inline const std::vector<EndpointInfo>& get_endpoints() {
         {"POST", "/api/v1/jobs/dlq/{id}/requeue", "Requeue a DLQ job"},
         {"GET", "/api/v1/jobs/{id}", "Get job status"},
         {"DELETE", "/api/v1/jobs/{id}", "Cancel job"},
+        {"GET", "/api/v1/posts", "List posts (admin)"},
+        {"POST", "/api/v1/posts", "Create post (admin)"},
+        {"GET", "/api/v1/posts/{id}", "Get post (admin)"},
+        {"POST", "/api/v1/posts/{id}/preview-token", "Admin: issue a draft preview link (1h)"},
+        {"PATCH", "/api/v1/posts/{id}", "Update post (admin)"},
+        {"DELETE", "/api/v1/posts/{id}", "Delete post (admin)"},
+        {"GET", "/api/v1/public/posts", "List published posts (public; filterable, paged, optional facets)"},
+        {"GET", "/api/v1/public/posts/{slug}", "Get published post by slug (public)"},
+        {"GET", "/posts/{slug}", "Published post body as raw Markdown (public)"},
+        {"GET", "/sitemap.xml", "Dynamic sitemap over published posts (public)"},
+        {"POST", "/api/v1/admin/uploads", "Upload an image (admin)"},
+        {"GET", "/api/v1/admin/uploads", "Admin: list uploaded images"},
+        {"DELETE", "/api/v1/admin/uploads/{name}", "Admin: delete an uploaded image"},
+        {"GET", "/uploads/{key}", "Serve an uploaded image (public; local storage backend only)"},
     };
     return endpoints;
 }

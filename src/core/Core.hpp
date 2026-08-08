@@ -821,4 +821,16 @@ inline bool is_shutting_down() {
     return shutting_down_flag.load();
 }
 
+/// Content module (posts/uploads/sitemap) master switch. Routes are
+/// statically registered, so handlers consult this per-request and 404
+/// when the module is off. Same is_initialized() guard as
+/// ContentPagesController::base_url — a handler can run before/after Core
+/// teardown in tests, and Config::get() throws when uninitialized; treat
+/// that the same as "off" rather than letting it escape as a 500.
+inline bool content_enabled() {
+    if (!Config::is_initialized())
+        return false;
+    return Config::get().get<bool>("content.enabled", "CONTENT_ENABLED", false);
+}
+
 }  // namespace Core

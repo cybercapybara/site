@@ -235,6 +235,20 @@ jobs:
   maxRetries: 3
 
 # ---------------------------------------------------------------
+# Content module (posts/uploads/sitemap) — disabled by default, same on/off
+# pattern as Jobs above. API-side only, no cpp-worker equivalent.
+# Env vars set: CONTENT_ENABLED
+#
+# This chart has no values-driven API_PUBLIC_PATHS override today. If a
+# deployment injects one anyway (e.g. via a raw env override outside this
+# chart's schema), enabling content here also requires adding its public
+# paths (/posts/*, /sitemap.xml, /api/v1/public/posts,
+# /api/v1/public/posts/*, /uploads/*) to that override — see docs/CONFIG.md.
+# ---------------------------------------------------------------
+content:
+  enabled: false
+
+# ---------------------------------------------------------------
 # Rate limiting — Redis-backed throttle applied by the middleware chain
 # (notably on /api/auth/login). The C++ code defaults RATE_LIMIT_ENABLED to
 # FALSE, so this MUST be set true in prod or every pod runs unthrottled.

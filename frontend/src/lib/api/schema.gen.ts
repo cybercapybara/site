@@ -1729,6 +1729,751 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/posts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List posts (admin; offset-paginated, filterable) */
+        get: {
+            parameters: {
+                query?: {
+                    limit?: number;
+                    offset?: number;
+                    /** @description Case-insensitive search over title+slug+summary */
+                    q?: string;
+                    status?: "draft" | "published";
+                    topic?: string;
+                    tag?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description { data, total, limit, offset } */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not an admin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        /** Create post (admin) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        slug: string;
+                        title: string;
+                        summary?: string;
+                        body?: string;
+                        /**
+                         * @default draft
+                         * @enum {string}
+                         */
+                        status?: "draft" | "published";
+                        /** @description Section label (e.g. Kubernetes) */
+                        topic?: string;
+                        /** @description Keyword tags driving the index tag cloud. No commas or line breaks per tag. */
+                        tags?: string[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Validation failed */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not an admin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Slug already exists */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/posts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** Get post (admin) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        /** Delete post (admin) */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Deleted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        /**
+         * Update post (admin) — partial; omitted fields keep their current value
+         * @description Partial update. Only the fields present in the body are changed; omitted fields (including status) keep their current value, so a title-only PATCH does not unpublish the post or clear published_at. Send status=draft explicitly to unpublish.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        slug?: string;
+                        title?: string;
+                        summary?: string;
+                        body?: string;
+                        /** @enum {string} */
+                        status?: "draft" | "published";
+                        /** @description Section label (e.g. Kubernetes) */
+                        topic?: string;
+                        /** @description Keyword tags driving the index tag cloud. No commas or line breaks per tag. */
+                        tags?: string[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Validation failed */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not an admin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Slug already exists */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/api/v1/posts/{id}/preview-token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Admin: issue a draft preview link (stateless HMAC token, 1h TTL) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description { data: { url: '/posts/<slug>?preview=<token>', expires_at } } */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Invalid UUID */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not an admin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/posts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List published posts (public, no auth) — server-filtered, paged, optional facets */
+        get: {
+            parameters: {
+                query?: {
+                    page?: number;
+                    limit?: number;
+                    /** @description Exact topic; 'Other' also matches blank topics */
+                    topic?: string;
+                    /** @description Exact tag membership */
+                    tag?: string;
+                    /** @description Case-insensitive search over title+summary */
+                    q?: string;
+                    /** @description Embed facets computed over the current filter */
+                    include?: "facets";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Published posts, newest first */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data: {
+                                slug: string;
+                                title: string;
+                                summary: string;
+                                topic: string;
+                                tags: string[];
+                                /** Format: date-time */
+                                published_at: string | null;
+                                read_mins: number;
+                            }[];
+                            total: number;
+                            limit: number;
+                            offset: number;
+                            facets?: {
+                                topics?: {
+                                    name?: string;
+                                    count?: number;
+                                }[];
+                                tags?: {
+                                    name?: string;
+                                    count?: number;
+                                }[];
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/posts/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        /** Get a published post by slug (public, no auth) */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Embed prev/next published neighbours: { adjacent: { prev, next } } (null at feed edges) */
+                    include?: "adjacent";
+                    /** @description Draft preview token (issued via /api/v1/posts/{id}/preview-token); invalid/expired behaves like 404 */
+                    preview?: string;
+                };
+                header?: never;
+                path: {
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK — { data } (+ data.adjacent with include=adjacent) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not found or not published */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/posts/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        /** Published post body as raw Markdown (public, no auth) */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Draft preview token (issued via /api/v1/posts/{id}/preview-token); reveals that draft's Markdown when valid; invalid/expired/mismatched behaves like 404 */
+                    preview?: string;
+                };
+                header?: never;
+                path: {
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Markdown body: a `# {title}` heading line, a blank line, then the post's raw body */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/markdown": string;
+                    };
+                };
+                /** @description Content module disabled, unknown slug, or a draft with no (valid, matching) preview token — all render the same Markdown 404 body */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/markdown": string;
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sitemap.xml": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Dynamic sitemap over published posts (public, no auth) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description `<urlset>` with the site root plus one `<url>` per published post */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/xml": string;
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/uploads/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Serve a stored upload (public, no auth, local storage backend only)
+         * @description Same-origin read path for the objects written by POST /api/v1/admin/uploads. With no CDN origin configured Storage::url() returns /uploads/<key>, which is what the editor embeds in post bodies, and it must be same-origin because the public-site CSP is "img-src 'self' data:". The key spans path segments (posts/<hex>.<ext>), so the route is registered by regex. Content type comes from the extension allowlist, never from the request. When storage.public_base_url IS set the URLs are absolute and this route answers 404.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Full storage key, e.g. posts/9f2c0a....png */
+                    key: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The stored object, with Cache-Control: public, max-age=31536000, immutable */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Content module disabled, unsafe key, extension outside the raster allowlist, no such object, or a CDN origin is configured */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Storage read failed */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Admin: list uploaded images (media library) */
+        get: {
+            parameters: {
+                query?: {
+                    limit?: number;
+                    offset?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description { data: [ { key, name, url, size_bytes, content_type, created_at } ], total, limit, offset } — newest first */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not an admin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Content module disabled */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Storage backend not configured */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        /** Upload an image (admin) → { key, url } */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        /** Format: binary */
+                        file?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Stored — { data: { key, url } } */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description no_file | unsupported_type (raster only — SVG is rejected) | bad_size (1 byte – 5 MB) | bad_content (magic bytes do not match the extension) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not an admin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Content module disabled */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Storage backend not configured */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/uploads/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Single-segment basename of an upload key (posts/<name>) */
+                name: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Admin: delete an uploaded image */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Single-segment basename of an upload key (posts/<name>) */
+                    name: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Deleted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Name is not a single URL-safe segment */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not an admin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Content module disabled, or no such upload */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Storage backend not configured */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {

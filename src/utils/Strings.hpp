@@ -26,6 +26,13 @@ namespace Utils::Strings {
  * link isn't logged in), so they ship public by default. Note the static
  * `*-request` / `confirm-resend` routes are deliberately NOT here:
  * change-email-request and confirm-resend require an authenticated principal.
+ *
+ * `/uploads` is here for the same reason as the posts routes: with the local
+ * storage backend, post bodies embed same-origin image URLs
+ * (UploadController::serveUpload) that anonymous readers have to be able to
+ * fetch.
+ * (Route globs are spelled without the star in this comment on purpose: a
+ * slash-star pair inside a block comment trips -Wcomment, and CI is -Werror.)
  */
 inline constexpr const char* kDefaultPublicPathsCsv =
     "/,/healthz,/ready,/health,/metrics,"
@@ -33,27 +40,34 @@ inline constexpr const char* kDefaultPublicPathsCsv =
     "/api/v1/auth/login,/api/v1/auth/register,/api/v1/auth/refresh,"
     "/api/v1/account/confirm/*,/api/v1/account/reset-password-request,"
     "/api/v1/account/reset-password/*,/api/v1/account/change-email/*,"
-    "/api/v1/account/join-from-invite/*";
+    "/api/v1/account/join-from-invite/*,"
+    "/api/v1/public/posts,/api/v1/public/posts/*,"
+    "/posts/*,/sitemap.xml,/uploads/*";
 
 /**
  * @brief Public endpoints that must STILL be rate-limited despite being
  *        auth-public. These are the brute-force / mail-bombing surfaces:
  *        login & register (credential stuffing), refresh (token churn),
- *        reset-password-request (mail bomb), and the token-bearing links
- *        (reset / confirm / change-email / invite — guessable-token attempts).
+ *        reset-password-request (mail bomb), the token-bearing links
+ *        (reset / confirm / change-email / invite — guessable-token attempts),
+ *        and the content module's public surface (posts list/detail, the
+ *        Markdown mirror, the sitemap, and served uploads — all reachable by
+ *        an anonymous caller, so all are scrapeable without this).
  *
- * This is the auth/account subset of kDefaultPublicPathsCsv minus the infra
- * and static surface (`/`, `/healthz`, `/ready`, `/health`, `/metrics`,
+ * This is the auth/account/content subset of kDefaultPublicPathsCsv minus the
+ * infra and static surface (`/`, `/healthz`, `/ready`, `/health`, `/metrics`,
  * `/api/v1/docs`, `/api/v1/openapi.yaml`), which we never want to throttle. The
  * general limiter skips everything in api.public_paths; without this list the
- * auth surface would be skipped too, leaving it wide open. Matched the same
- * way as public paths (exact, or trailing `*` prefix).
+ * auth and content surfaces would be skipped too, leaving them wide open.
+ * Matched the same way as public paths (exact, or trailing `*` prefix).
  */
 inline constexpr const char* kDefaultProtectedPathsCsv =
     "/api/v1/auth/login,/api/v1/auth/register,/api/v1/auth/refresh,"
     "/api/v1/account/confirm/*,/api/v1/account/reset-password-request,"
     "/api/v1/account/reset-password/*,/api/v1/account/change-email/*,"
-    "/api/v1/account/join-from-invite/*";
+    "/api/v1/account/join-from-invite/*,"
+    "/api/v1/public/posts,/api/v1/public/posts/*,"
+    "/posts/*,/sitemap.xml,/uploads/*";
 
 /**
  * @brief True if @p path is covered by @p public_paths — exact match, or a

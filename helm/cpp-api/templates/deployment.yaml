@@ -179,6 +179,9 @@ spec:
               value: {{ .Values.jobs.resultTtl | quote }}
             - name: JOBS_MAX_RETRIES
               value: {{ .Values.jobs.maxRetries | quote }}
+            # Content module (posts/uploads/sitemap) — api-side only
+            - name: CONTENT_ENABLED
+              value: {{ .Values.content.enabled | quote }}
             # Rate limiting — code defaults RATE_LIMIT_ENABLED to false, so a
             # prod pod without this runs /api/auth/login unthrottled. Inject
             # explicitly. fail_open=true means Redis outages don't block traffic.

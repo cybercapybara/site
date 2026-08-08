@@ -179,6 +179,20 @@ For URL components: `REDIS_HOST`, `REDIS_PORT`.
 | `JOBS_DLQ_METRIC_REFRESH_SEC` | `jobs.dlq_metric_refresh_sec` | int | `10` | Exports `jobs_dlq_depth{type="..."}` plus an aggregate `type="_total"` |
 | `DB_REPLICA_LAG_METRIC_REFRESH_SEC` | `database.replica_lag_metric_refresh_sec` | int | `15` | Refresh interval for the `db_replica_lag_seconds` gauge. Only registered when read replicas are configured (primary has no replay timestamp). |
 
+## Content
+
+| Env | JSON key | Type | Default | Notes |
+|---|---|---|---|---|
+| `CONTENT_ENABLED` | `content.enabled` | bool | `false` | Master switch for the posts/uploads/sitemap module (`PostsController`, `ContentPagesController`, `UploadController`) — same on/off pattern as `JOBS_ENABLED`. Routes are always registered; handlers 404 while off (`/sitemap.xml` degrades to a root-only sitemap instead — see the content module design doc). |
+
+Enabling content on a deployment whose `API_PUBLIC_PATHS` overrides the
+built-in default (rather than leaving it unset) must also add the module's
+public paths to that override — `/posts/*`, `/sitemap.xml`,
+`/api/v1/public/posts`, `/api/v1/public/posts/*`, `/uploads/*` — or anonymous
+readers get 401/404 on routes the code otherwise treats as public. See
+`config/config.production.json`, which currently overrides `API_PUBLIC_PATHS`
+without these and intentionally ships with content still gated off.
+
 ## Mail (SMTP)
 
 | Env | JSON key | Type | Default | Notes |

@@ -230,6 +230,15 @@ TEST_F(ConfigTest, RequireReturnsEnvOverValue) {
     EXPECT_EQ(config.require<std::string>("test.value", "CFG_REQUIRED"), "hello");
 }
 
+// ── Content module master switch (posts/uploads/sitemap) ──────────────────
+
+TEST_F(ConfigTest, ContentDisabledByDefault) {
+    // test_config_file (see SetUp) carries no "content" section — the flag
+    // must default off.
+    Config::initialize(test_config_file);
+    EXPECT_FALSE(Config::get().get<bool>("content.enabled", "CONTENT_ENABLED", false));
+}
+
 TEST_F(ConfigTest, GetJsonRawAccess) {
     Config::initialize(test_config_file);
     auto& config = Config::get();
