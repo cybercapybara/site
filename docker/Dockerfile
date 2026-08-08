@@ -80,8 +80,13 @@ COPY vcpkg.json ./
 # BuildKit cache mounts keep vcpkg source tarballs and built-package archives
 # across builds (and across FAILED builds — without them, one flaky download
 # or compile error discards the whole dependency set with the RUN layer).
-RUN --mount=type=cache,target=/opt/vcpkg/downloads \
-    --mount=type=cache,target=/root/.cache/vcpkg \
+# The id= carries TARGETARCH: in a multi-arch buildx run both platform legs
+# execute concurrently, and an UNSCOPED cache mount is shared between them —
+# vcpkg then extracts tools (ninja) into the same path from both legs and one
+# leg executes the other's binary (release v1.5.0 failed exactly this way).
+ARG TARGETARCH
+RUN --mount=type=cache,target=/opt/vcpkg/downloads,id=vcpkg-downloads-${TARGETARCH} \
+    --mount=type=cache,target=/root/.cache/vcpkg,id=vcpkg-cache-${TARGETARCH} \
     vcpkg install --x-install-root=/app/build/vcpkg_installed
 
 # Copy source code (after the dep layer, so editing src/ never rebuilds deps).
@@ -93,8 +98,8 @@ COPY . .
 # Pass --build-arg ENABLE_WERROR=ON from CI; defaults to OFF for local builds.
 ARG ENABLE_WERROR=OFF
 
-RUN --mount=type=cache,target=/opt/vcpkg/downloads \
-    --mount=type=cache,target=/root/.cache/vcpkg \
+RUN --mount=type=cache,target=/opt/vcpkg/downloads,id=vcpkg-downloads-${TARGETARCH} \
+    --mount=type=cache,target=/root/.cache/vcpkg,id=vcpkg-cache-${TARGETARCH} \
     mkdir -p build && cd build && \
     cmake .. \
     -G Ninja \
