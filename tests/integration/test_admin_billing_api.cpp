@@ -33,6 +33,8 @@ using json = nlohmann::json;
 
 namespace {
 
+constexpr const char* kSecret = "test-jwt-secret-for-admin-billing-api-flow-pad";
+
 /// Minimal PayPal test double — only create_order is needed to prove a NEW
 /// top-up picks up a settings change; capture_order is never exercised here.
 class TopupFakePayPalClient : public Billing::PayPalClient {
@@ -70,6 +72,14 @@ protected:
     std::string config_file_name() const override { return "admin_billing_api_test_config.json"; }
 
     void config_overrides(json& cfg) override {
+        // Every route in this controller is admin-gated in-handler via
+        // API_REQUIRE_ADMIN, which is a no-op unless auth.mode != "none"
+        // (see Guards.hpp / Security::Auth::require_admin). Without this,
+        // NonAdminGets403OnEveryRoute would pass trivially for the wrong
+        // reason — the guard never runs, not because it correctly rejects.
+        // Matches the convention in test_posts_api.cpp / test_admin_flow.cpp.
+        cfg["auth"]["mode"] = "jwt";
+        cfg["auth"]["jwt"]["secret"] = kSecret;
         cfg["database"]["migrations_enabled"] = true;
         cfg["database"]["migrations_dir"] = "migrations";
         cfg["billing"]["enabled"] = true;

@@ -225,9 +225,19 @@ protected:
     json do_webhook(const json& event, int* status = nullptr, bool include_headers = true) {
         auto req = TestHelpers::make_request(drogon::Post, event);
         if (include_headers) {
+            // "id" is deliberately a JSON number in the
+            // WebhookMalformedButSignedBodyReturns5xxNotCrash repro, so
+            // event.value("id", std::string(...)) (a STRING-typed default)
+            // would throw json::type_error.302 right here — before the
+            // handler under test is even invoked. Only pull "id" as a
+            // string when it actually is one; anything else falls back to
+            // the same "none" placeholder, so the malformed body still
+            // reaches paypalWebhook() to exercise its own try/catch.
+            const std::string transmission_id =
+                (event.contains("id") && event["id"].is_string()) ? event["id"].get<std::string>() : "none";
             req->addHeader("Paypal-Auth-Algo", "SHA256withRSA");
             req->addHeader("Paypal-Cert-Url", "https://api.sandbox.paypal.com/cert");
-            req->addHeader("Paypal-Transmission-Id", "txn-" + event.value("id", std::string("none")));
+            req->addHeader("Paypal-Transmission-Id", "txn-" + transmission_id);
             req->addHeader("Paypal-Transmission-Sig", "sig");
             req->addHeader("Paypal-Transmission-Time", "2026-01-01T00:00:00Z");
         }
