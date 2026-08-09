@@ -6,6 +6,15 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.5.2] — 2026-08-09
+
+### Fixed
+- `db_replica_lag_seconds` reported "time since the last replayed COMMIT",
+  which climbs without bound on an idle primary even when the replica is
+  fully caught up — firing `CppApiHighReplicaLag` permanently on any quiet
+  deployment. Receive/replay LSNs are compared first and the metric reports
+  0 when they match.
+
 ## [1.5.1] — 2026-08-09
 
 Live-deploy fixes for the 1.5.0 content module.
