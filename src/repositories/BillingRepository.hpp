@@ -66,16 +66,21 @@ public:
         });
     }
 
-    Domain::Package create(const std::string& title, std::int64_t amount_cents, std::int64_t credits, bool active, int sort) {
+    Domain::Package create(const std::string& title,
+                           std::int64_t amount_cents,
+                           std::int64_t credits,
+                           bool active,
+                           int sort) {
         return Database::get().execute_write([&](auto& txn) {
-            auto r = txn.exec_params(std::string("INSERT INTO billing_packages (title, amount_cents, credits, active, sort) "
-                                                 "VALUES ($1, $2, $3, $4, $5) RETURNING ") +
-                                         kColumns,
-                                     title,
-                                     amount_cents,
-                                     credits,
-                                     active,
-                                     sort);
+            auto r = txn.exec_params(
+                std::string("INSERT INTO billing_packages (title, amount_cents, credits, active, sort) "
+                            "VALUES ($1, $2, $3, $4, $5) RETURNING ") +
+                    kColumns,
+                title,
+                amount_cents,
+                credits,
+                active,
+                sort);
             return Domain::Package::from_row(r[0]);
         });
     }
@@ -183,7 +188,8 @@ public:
     std::optional<Domain::Payment> find_by_capture_id(const std::string& provider_capture_id) {
         return Database::get().execute_read([&](auto& txn) -> std::optional<Domain::Payment> {
             auto r = txn.exec_params(
-                std::string("SELECT ") + kColumns + " FROM payments WHERE provider_capture_id = $1", provider_capture_id);
+                std::string("SELECT ") + kColumns + " FROM payments WHERE provider_capture_id = $1",
+                provider_capture_id);
             if (r.empty())
                 return std::nullopt;
             return Domain::Payment::from_row(r[0]);

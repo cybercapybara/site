@@ -25,6 +25,20 @@
  *     be remembered so a redelivery can't re-decide (or worse, re-apply
  *     later once the balance happens to recover).
  *
+ * `wallet_balances` upserts NEVER use a self-referencing SQL expression
+ * (`SET credits = wallet_balances.credits + EXCLUDED.credits`) — every write
+ * here locks the row first (`SELECT ... FOR UPDATE`), computes the new total
+ * in C++ from that locked read, and upserts with `SET credits =
+ * EXCLUDED.credits` against the explicit computed value. An earlier version
+ * of this file used the self-referencing form; CI proved it does not
+ * reliably read the pre-existing row inside its own ON CONFLICT DO UPDATE —
+ * every write after the first for a given user silently discarded the true
+ * prior balance and computed as though it were 0. Invisible for a positive
+ * delta (a wrong-but-non-negative result never trips `CHECK (credits >=
+ * 0)`); fatal for a negative one (a correctly-sufficient refund/debit
+ * against a real balance still computed as negative and 500'd). See
+ * refund_capture's docs and the fix-round report for the full diagnosis.
+ *
  * `CreditResult::credited` means "this call durably recorded something new"
  * — false only for the idempotent no-op (an already-seen refund id, or an
  * already-captured order). It does NOT mean "the wallet balance moved": a
@@ -63,7 +77,9 @@ namespace Billing {
  */
 struct InsufficientBalance : Repositories::ConflictError {
     InsufficientBalance()
-        : Repositories::ConflictError("insufficient_balance", "This adjustment would drive the wallet balance negative") {}
+        : Repositories::ConflictError(
+              "insufficient_balance",
+              "This adjustment would drive the wallet balance negative") {}
 };
 
 /**
@@ -77,7 +93,9 @@ struct InsufficientBalance : Repositories::ConflictError {
  */
 struct DuplicateCaptureId : Repositories::ConflictError {
     DuplicateCaptureId()
-        : Repositories::ConflictError("capture_id_conflict", "This capture id is already recorded against a different payment") {}
+        : Repositories::ConflictError(
+              "capture_id_conflict",
+              "This capture id is already recorded against a different payment") {}
 };
 
 /**
@@ -221,7 +239,9 @@ inline std::vector<Domain::WalletEntry> history(const std::string& user_id,
  *
  * ONE transaction: the guarded status/capture-id UPDATE, the amount+currency
  * check, the ledger insert and the balance upsert all commit or roll back
- * together.
+ * together. The balance upsert locks the wallet_balances row first
+ * (`SELECT ... FOR UPDATE`) and computes the new total in C++ — see the
+ * file-level note on why it never uses a self-referencing SQL expression.
  *
  * @throws Repositories::PaymentNotFound if @p provider_order_id is unknown.
  * @throws DuplicateCaptureId if @p provider_capture_id already belongs to a
@@ -300,12 +320,19 @@ inline CreditResult credit_capture(const std::string& provider_order_id,
                     user_id,
                     credits_expected,
                     payment_id);
+
+                // Lock the balance row and compute the new total explicitly —
+                // see the file-level note on why this never uses
+                // `SET credits = wallet_balances.credits + EXCLUDED.credits`.
+                auto wb = txn.exec_params("SELECT credits FROM wallet_balances WHERE user_id = $1 FOR UPDATE", user_id);
+                const std::int64_t current_balance = wb.empty() ? 0 : wb[0]["credits"].template as<std::int64_t>();
+                const std::int64_t new_total = current_balance + credits_expected;
                 auto br = txn.exec_params(
                     "INSERT INTO wallet_balances (user_id, credits) VALUES ($1, $2) "
-                    "ON CONFLICT (user_id) DO UPDATE SET credits = wallet_balances.credits + EXCLUDED.credits, "
-                    "updated_at = now() RETURNING credits",
+                    "ON CONFLICT (user_id) DO UPDATE SET credits = EXCLUDED.credits, updated_at = now() "
+                    "RETURNING credits",
                     user_id,
-                    credits_expected);
+                    new_total);
 
                 return CreditResult{true, br[0]["credits"].template as<std::int64_t>(), payment_id};
             });
@@ -373,7 +400,10 @@ inline CreditResult credit_capture(const std::string& provider_order_id,
  *      Either way: log at `error` for manual reconciliation, write the
  *      `billing_refunds` row with that outcome and `credits_deducted = 0`,
  *      skip the ledger insert entirely. Otherwise: ledger insert + balance
- *      upsert, outcome `applied`, `credits_deducted = refund_credits`.
+ *      upsert (the NEW total — `new_balance - refund_credits` — computed
+ *      from the locked read above and set explicitly, never via a
+ *      self-referencing SQL expression), outcome `applied`,
+ *      `credits_deducted = refund_credits`.
  *   5. `payments.status` becomes `refunded` when the CUMULATIVE total of
  *      every refund against this payment (steps 3's running total,
  *      including this one) reaches `payments.amount_cents` AND the payment
@@ -430,7 +460,8 @@ inline CreditResult refund_capture(const std::string& provider_capture_id,
 
         // Idempotency FIRST, via the durable marker — see the function docs
         // for why this can no longer be "does a wallet_entries row exist".
-        auto existing = txn.exec_params("SELECT id FROM billing_refunds WHERE provider_refund_id = $1", provider_refund_id);
+        auto existing =
+            txn.exec_params("SELECT id FROM billing_refunds WHERE provider_refund_id = $1", provider_refund_id);
         if (!existing.empty()) {
             return CreditResult{false, detail::read_balance(txn, user_id), payment_id};
         }
@@ -506,6 +537,10 @@ inline CreditResult refund_capture(const std::string& provider_capture_id,
                 refund_credits,
                 new_balance);
         } else {
+            // Compute the new total explicitly from the locked read above and
+            // set it directly — never via `SET credits = wallet_balances.credits
+            // + EXCLUDED.credits` (see the file-level note).
+            const std::int64_t computed_new_balance = new_balance - refund_credits;
             txn.exec_params(
                 "INSERT INTO wallet_entries (user_id, delta_credits, kind, reference) VALUES ($1, $2, 'refund', $3)",
                 user_id,
@@ -513,10 +548,10 @@ inline CreditResult refund_capture(const std::string& provider_capture_id,
                 provider_refund_id);
             auto upserted = txn.exec_params(
                 "INSERT INTO wallet_balances (user_id, credits) VALUES ($1, $2) "
-                "ON CONFLICT (user_id) DO UPDATE SET credits = wallet_balances.credits + EXCLUDED.credits, "
-                "updated_at = now() RETURNING credits",
+                "ON CONFLICT (user_id) DO UPDATE SET credits = EXCLUDED.credits, updated_at = now() "
+                "RETURNING credits",
                 user_id,
-                -refund_credits);
+                computed_new_balance);
             new_balance = upserted[0]["credits"].template as<std::int64_t>();
             outcome = "applied";
             credits_deducted = refund_credits;
@@ -585,7 +620,10 @@ inline CreditResult refund_capture(const std::string& provider_capture_id,
  * insert can't say which one was bad, so both are validated explicitly,
  * user_id first, as their own standalone reads BEFORE the write transaction
  * opens (see detail::check_user_id — the same "don't catch 22P02 mid-
- * transaction" reasoning that governs refund_capture's design).
+ * transaction" reasoning that governs refund_capture's design). The balance
+ * upsert locks wallet_balances first and computes the new total in C++ —
+ * see the file-level note on why it never uses a self-referencing SQL
+ * expression.
  *
  * @throws ZeroAdjustment if @p delta_credits is 0.
  * @throws MalformedUserId / UnknownUser if @p user_id is malformed / unknown.
@@ -622,6 +660,18 @@ inline CreditResult adjust(const std::string& user_id,
     return Repositories::detail::translate_sql(
         [&] {
             return Database::get().execute_write([&](auto& txn) -> CreditResult {
+                // Lock the balance row and compute the new total explicitly —
+                // see the file-level note on why this never uses
+                // `SET credits = wallet_balances.credits + EXCLUDED.credits`.
+                // A negative new_total is still written as-is: the CHECK
+                // (credits >= 0) then reliably rejects it (this is now a
+                // plain "does this literal value satisfy the constraint"
+                // check, not a self-referencing expression), caught below as
+                // SQLSTATE 23514.
+                auto wb = txn.exec_params("SELECT credits FROM wallet_balances WHERE user_id = $1 FOR UPDATE", user_id);
+                const std::int64_t current_balance = wb.empty() ? 0 : wb[0]["credits"].template as<std::int64_t>();
+                const std::int64_t new_total = current_balance + delta_credits;
+
                 txn.exec_params(
                     "INSERT INTO wallet_entries (user_id, delta_credits, kind, reference, note, created_by) "
                     "VALUES ($1, $2, 'adjustment', '', $3, $4)",
@@ -631,10 +681,10 @@ inline CreditResult adjust(const std::string& user_id,
                     admin_id);
                 auto br = txn.exec_params(
                     "INSERT INTO wallet_balances (user_id, credits) VALUES ($1, $2) "
-                    "ON CONFLICT (user_id) DO UPDATE SET credits = wallet_balances.credits + EXCLUDED.credits, "
-                    "updated_at = now() RETURNING credits",
+                    "ON CONFLICT (user_id) DO UPDATE SET credits = EXCLUDED.credits, updated_at = now() "
+                    "RETURNING credits",
                     user_id,
-                    delta_credits);
+                    new_total);
                 return CreditResult{true, br[0]["credits"].template as<std::int64_t>(), std::string{}};
             });
         },

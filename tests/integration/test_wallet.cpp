@@ -60,8 +60,8 @@ protected:
             ADD_FAILURE() << "role User missing — seed migration?";
             throw std::runtime_error("seed role missing: User");
         }
-        auto created =
-            users.create(email, std::string("$argon2id$placeholder"), std::nullopt, std::nullopt, role->id, /*confirmed=*/true);
+        auto created = users.create(
+            email, std::string("$argon2id$placeholder"), std::nullopt, std::nullopt, role->id, /*confirmed=*/true);
         return created.id;
     }
 
@@ -463,7 +463,7 @@ TEST_F(WalletTest, DuplicateRefundIdAfterInsufficiencySkipNeverAppliesLater) {
     // debit now that the balance could technically afford it.
     auto redelivered = Billing::refund_capture("CAPTURE-5E", "REFUND-RECOVER", 1000);
     EXPECT_FALSE(redelivered.credited);
-    EXPECT_EQ(Billing::balance_of(user_id), 5050);  // untouched by the redelivery
+    EXPECT_EQ(Billing::balance_of(user_id), 5050);     // untouched by the redelivery
     EXPECT_EQ(refund_row_count(first.payment_id), 1);  // still exactly one billing_refunds row
 }
 
@@ -624,7 +624,7 @@ TEST_F(WalletTest, PackageRepositoryListActiveExcludesInactiveAndOrdersBySort) {
 
     auto active = packages.list_active();
     ASSERT_EQ(active.size(), 2u);
-    EXPECT_EQ(active[0].title, "First");   // sort=1 before sort=2
+    EXPECT_EQ(active[0].title, "First");  // sort=1 before sort=2
     EXPECT_EQ(active[1].title, "Second");
     for (const auto& p : active)
         EXPECT_NE(p.title, "Hidden");
@@ -645,13 +645,14 @@ TEST_F(WalletTest, PackageRepositoryUpdateKeepsOmittedFields) {
     EXPECT_FALSE(updated.active);
     EXPECT_EQ(updated.sort, 1);  // unchanged
 
-    EXPECT_THROW(packages.update("00000000-0000-0000-0000-000000000000",
-                                 std::string("x"),
-                                 std::nullopt,
-                                 std::nullopt,
-                                 std::nullopt,
-                                 std::nullopt),
-                Repositories::PackageNotFound);
+    EXPECT_THROW(
+        packages.update("00000000-0000-0000-0000-000000000000",
+                        std::string("x"),
+                        std::nullopt,
+                        std::nullopt,
+                        std::nullopt,
+                        std::nullopt),
+        Repositories::PackageNotFound);
 }
 
 TEST_F(WalletTest, PackageRepositoryRemoveDeletesRow) {
