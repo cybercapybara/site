@@ -46,7 +46,8 @@ protected:
         if (::testing::Test::IsSkipped())
             return;
         Database::get().execute_write([](auto& txn) {
-            txn.exec("TRUNCATE TABLE wallet_entries, wallet_balances, payments, billing_packages CASCADE");
+            txn.exec(
+                "TRUNCATE TABLE wallet_entries, wallet_balances, billing_refunds, payments, billing_packages CASCADE");
             txn.exec("TRUNCATE TABLE users CASCADE");
             txn.exec("DELETE FROM roles WHERE name NOT IN ('User', 'Administrator')");
             return 0;
@@ -73,6 +74,25 @@ protected:
                                  std::int64_t credits_expected = 1000,
                                  std::int64_t rate_snapshot = 100) {
         return payments.create(user_id, order_id, amount_cents, "USD", credits_expected, rate_snapshot, std::nullopt);
+    }
+
+    // billing_refunds has no repository (it's Wallet.hpp's own internal
+    // idempotency marker) — read it directly for assertions.
+    std::optional<std::string> refund_outcome(const std::string& provider_refund_id) {
+        return Database::get().execute_read([&](auto& txn) -> std::optional<std::string> {
+            auto r = txn.exec_params("SELECT outcome FROM billing_refunds WHERE provider_refund_id = $1",
+                                     provider_refund_id);
+            if (r.empty())
+                return std::nullopt;
+            return r[0]["outcome"].template as<std::string>();
+        });
+    }
+
+    long refund_row_count(const std::string& payment_id) {
+        return Database::get().execute_read([&](auto& txn) {
+            auto r = txn.exec_params("SELECT COUNT(*) FROM billing_refunds WHERE payment_id = $1", payment_id);
+            return r[0][0].template as<long>();
+        });
     }
 };
 
@@ -248,6 +268,14 @@ TEST_F(WalletTest, DistinctPartialRefundsBothApply) {
             ++refund_rows;
     EXPECT_EQ(refund_rows, 2);
 
+    // NEW-4 scope note: status only flips on a SINGLE call whose amount
+    // equals the full payment amount — two partials that sum to the full
+    // amount do not (neither individual call is itself "full"). The payment
+    // stays 'captured' even though it is fully refunded in aggregate.
+    auto found = payments.find_by_capture_id("CAPTURE-4B");
+    ASSERT_TRUE(found.has_value());
+    EXPECT_EQ(found->status, "captured");
+
     // Redelivering the FIRST partial refund's id again is still a no-op —
     // per-id idempotency, not a payments.status guard.
     auto redelivered_first = Billing::refund_capture("CAPTURE-4B", "REFUND-4B-1", 400);
@@ -309,12 +337,151 @@ TEST_F(WalletTest, RefundBeyondRemainingBalanceMarksPaymentRefundedWithoutGoingN
     for (const auto& e : hist)
         EXPECT_NE(e.kind, "refund");
 
-    // Redelivering the same (still-unfulfillable) refund id is still safe:
-    // no duplicate row, same outcome.
+    // The attempt is durably recorded (billing_refunds), not the ledger.
+    EXPECT_EQ(refund_outcome("REFUND-5"), "skipped_insufficient");
+
+    // Redelivering the same refund id is now a genuine idempotent no-op —
+    // the durable billing_refunds row is the marker, checked first.
     auto redelivered = Billing::refund_capture("CAPTURE-5", "REFUND-5", 1000);
-    EXPECT_TRUE(redelivered.credited);
+    EXPECT_FALSE(redelivered.credited);
     EXPECT_EQ(redelivered.balance, 100);
     EXPECT_EQ(Billing::history(user_id, 10, 0).size(), 2u);
+}
+
+// NEW-1: a refund small enough that it converts to 0 credits at the
+// payment's rate must never trip wallet_entries' CHECK(delta_credits <> 0)
+// — it used to escape as an uncaught 500 that PayPal would redeliver
+// forever. Also exercises NEW-4: since this is a PARTIAL refund
+// (50 cents of a 1000-cent payment), the payment status must stay
+// 'captured', not flip to 'refunded'.
+TEST_F(WalletTest, RefundSubUnitAmountConvertsToZeroCreditsIsRecordedNotCrashed) {
+    auto user_id = seed_user("buyer5b@example.com");
+    // rate=1 (1 credit per 100 cents) — 50 cents converts to 0 credits.
+    seed_payment(user_id, "ORDER-5B", /*amount_cents=*/1000, /*credits_expected=*/10, /*rate_snapshot=*/1);
+    auto captured = Billing::credit_capture("ORDER-5B", "CAPTURE-5B", 1000, "USD");
+    ASSERT_TRUE(captured.credited);
+    ASSERT_EQ(captured.balance, 10);
+
+    auto result = Billing::refund_capture("CAPTURE-5B", "REFUND-SUBUNIT", /*refunded_amount_cents=*/50);
+    EXPECT_TRUE(result.credited);
+    EXPECT_EQ(result.balance, 10);  // untouched
+    EXPECT_EQ(Billing::balance_of(user_id), 10);
+
+    // No refund ledger row — just the original topup.
+    auto hist = Billing::history(user_id, 10, 0);
+    ASSERT_EQ(hist.size(), 1u);
+    EXPECT_EQ(hist[0].kind, "topup");
+
+    EXPECT_EQ(refund_outcome("REFUND-SUBUNIT"), "skipped_zero_credits");
+
+    // Partial (50 != 1000) — status stays captured.
+    auto found = payments.find_by_capture_id("CAPTURE-5B");
+    ASSERT_TRUE(found.has_value());
+    EXPECT_EQ(found->status, "captured");
+}
+
+// NEW-4: a normal (nonzero-credit, sufficient-balance) PARTIAL refund must
+// not flip payments.status to 'refunded' — only a single call whose amount
+// equals the full payment amount does that.
+TEST_F(WalletTest, PartialRefundLeavesPaymentCaptured) {
+    auto user_id = seed_user("buyer5c@example.com");
+    seed_payment(user_id, "ORDER-5C", 1000, 1000);
+    auto captured = Billing::credit_capture("ORDER-5C", "CAPTURE-5C", 1000, "USD");
+    ASSERT_TRUE(captured.credited);
+
+    auto result = Billing::refund_capture("CAPTURE-5C", "REFUND-5C", /*refunded_amount_cents=*/300);
+    EXPECT_TRUE(result.credited);
+    EXPECT_EQ(result.balance, 700);
+    EXPECT_EQ(refund_outcome("REFUND-5C"), "applied");
+
+    auto found = payments.find_by_capture_id("CAPTURE-5C");
+    ASSERT_TRUE(found.has_value());
+    EXPECT_EQ(found->status, "captured");  // NOT refunded — this was partial
+}
+
+// NEW-4: a refund against a payment that failed capture (amount/currency
+// mismatch) must not overwrite 'failed' with 'refunded', even for an amount
+// that matches the payment's amount_cents (the "full refund" condition on
+// its own is not enough — the payment must also currently be 'captured').
+TEST_F(WalletTest, RefundAgainstFailedPaymentDoesNotOverwriteStatus) {
+    auto user_id = seed_user("buyer5d@example.com");
+    seed_payment(user_id, "ORDER-5D", 1000, 1000);
+    // Mismatched capture -> status='failed', but provider_capture_id is
+    // still recorded (credit_capture sets it before validating the amount).
+    auto mismatch = Billing::credit_capture("ORDER-5D", "CAPTURE-5D", /*captured_amount_cents=*/999, "USD");
+    ASSERT_FALSE(mismatch.credited);
+    auto pre = payments.find_by_capture_id("CAPTURE-5D");
+    ASSERT_TRUE(pre.has_value());
+    ASSERT_EQ(pre->status, "failed");
+
+    auto result = Billing::refund_capture("CAPTURE-5D", "REFUND-5D", /*refunded_amount_cents=*/1000);
+    EXPECT_TRUE(result.credited);  // recorded — nothing to refund since nothing was credited
+    EXPECT_EQ(refund_outcome("REFUND-5D"), "skipped_insufficient");  // balance is 0
+
+    auto found = payments.find_by_capture_id("CAPTURE-5D");
+    ASSERT_TRUE(found.has_value());
+    EXPECT_EQ(found->status, "failed");  // untouched
+}
+
+// NEW-2/NEW-3: once a refund id is durably recorded as skipped
+// (insufficient balance), a redelivery of that SAME id must stay a no-op
+// forever — even if the wallet balance later recovers enough that the
+// refund would now succeed. A delayed debit would double-process money the
+// caller already considers refunded once.
+TEST_F(WalletTest, DuplicateRefundIdAfterInsufficiencySkipNeverAppliesLater) {
+    auto user_id = seed_user("buyer5e@example.com");
+    seed_payment(user_id, "ORDER-5E", 1000, 1000);
+    auto captured = Billing::credit_capture("ORDER-5E", "CAPTURE-5E", 1000, "USD");
+    ASSERT_TRUE(captured.credited);
+
+    // Spend down so the (full) refund can't apply.
+    Database::get().execute_write([&](auto& txn) {
+        txn.exec_params(
+            "INSERT INTO wallet_entries (user_id, delta_credits, kind, reference) VALUES ($1, -950, 'spend', 'sim')",
+            user_id);
+        txn.exec_params("UPDATE wallet_balances SET credits = credits - 950 WHERE user_id = $1", user_id);
+        return 0;
+    });
+    ASSERT_EQ(Billing::balance_of(user_id), 50);
+
+    auto first = Billing::refund_capture("CAPTURE-5E", "REFUND-RECOVER", 1000);
+    EXPECT_TRUE(first.credited);
+    EXPECT_EQ(first.balance, 50);
+    EXPECT_EQ(refund_outcome("REFUND-RECOVER"), "skipped_insufficient");
+
+    // "Recover" the balance well past what the refund would have needed.
+    Billing::adjust(user_id, 5000, "top up for the test", seed_user("recover-admin@example.com"));
+    ASSERT_EQ(Billing::balance_of(user_id), 5050);
+
+    // Redelivering the SAME refund id must still be a no-op — no delayed
+    // debit now that the balance could technically afford it.
+    auto redelivered = Billing::refund_capture("CAPTURE-5E", "REFUND-RECOVER", 1000);
+    EXPECT_FALSE(redelivered.credited);
+    EXPECT_EQ(Billing::balance_of(user_id), 5050);  // untouched by the redelivery
+    EXPECT_EQ(refund_row_count(first.payment_id), 1);  // still exactly one billing_refunds row
+}
+
+// NEW-2/NEW-3: the running total of every refund recorded against a payment
+// must never exceed what was actually paid, even across separate calls that
+// each individually look valid.
+TEST_F(WalletTest, AggregateOverRefundIsRefused) {
+    auto user_id = seed_user("buyer5f@example.com");
+    seed_payment(user_id, "ORDER-5F", 1000, 1000);
+    auto captured = Billing::credit_capture("ORDER-5F", "CAPTURE-5F", 1000, "USD");
+    ASSERT_TRUE(captured.credited);
+
+    auto first = Billing::refund_capture("CAPTURE-5F", "REFUND-AGG-1", 600);
+    ASSERT_TRUE(first.credited);
+    ASSERT_EQ(first.balance, 400);
+
+    // 600 (already refunded) + 500 (this call) = 1100 > 1000 — individually
+    // 500 <= amount_cents, so only the AGGREGATE check catches this.
+    EXPECT_THROW(Billing::refund_capture("CAPTURE-5F", "REFUND-AGG-2", 500), Billing::InvalidRefundAmount);
+
+    // The rejected call wrote nothing at all.
+    EXPECT_EQ(Billing::balance_of(user_id), 400);
+    EXPECT_EQ(refund_row_count(first.payment_id), 1);
+    EXPECT_FALSE(refund_outcome("REFUND-AGG-2").has_value());
 }
 
 // ── adjust ───────────────────────────────────────────────────────────────────
@@ -361,6 +528,20 @@ TEST_F(WalletTest, AdjustThrowsOnUnknownUser) {
 TEST_F(WalletTest, AdjustThrowsOnMalformedUserId) {
     auto admin_id = seed_user("admin1d@example.com");
     EXPECT_THROW(Billing::adjust("not-a-uuid", 10, "note", admin_id), Billing::MalformedUserId);
+}
+
+// Minor fix: user_id and admin_id are both FKs on the same insert — a bad
+// ADMIN id must be reported as such, not misattributed to user_id.
+TEST_F(WalletTest, AdjustThrowsOnUnknownAdmin) {
+    auto user_id = seed_user("buyer6c@example.com");
+    EXPECT_THROW(Billing::adjust(user_id, 10, "note", "00000000-0000-0000-0000-000000000000"), Billing::UnknownAdmin);
+    EXPECT_EQ(Billing::history(user_id, 10, 0).size(), 0u);
+}
+
+TEST_F(WalletTest, AdjustThrowsOnMalformedAdminId) {
+    auto user_id = seed_user("buyer6d@example.com");
+    EXPECT_THROW(Billing::adjust(user_id, 10, "note", "not-a-uuid"), Billing::MalformedAdminId);
+    EXPECT_EQ(Billing::history(user_id, 10, 0).size(), 0u);
 }
 
 // ── the money invariant ──────────────────────────────────────────────────────
