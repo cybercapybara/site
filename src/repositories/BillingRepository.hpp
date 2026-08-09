@@ -238,6 +238,85 @@ public:
             return out;
         });
     }
+
+    // ── Admin listing (Task 6) ────────────────────────────────────────────
+    // Mirrors AuditRepository::list_filtered's "$N::type IS NULL means no
+    // constraint" shape — one fixed, parameter-bound query covers every
+    // combination of optional filters, so a client value can never reach the
+    // query as anything but a bound parameter.
+    struct Filters {
+        std::optional<std::string> status;
+        std::optional<std::string> user_id;
+    };
+
+    struct Page {
+        std::vector<Domain::Payment> entries;
+        long total{0};
+    };
+
+    Page list_filtered(const Filters& f, int limit, int offset) {
+        return Database::get().execute_read([&](auto& txn) {
+            const std::string where =
+                " WHERE ($1::text IS NULL OR status = $1)"
+                "   AND ($2::uuid IS NULL OR user_id = $2::uuid)";
+
+            auto rows = txn.exec_params(std::string("SELECT ") + kColumns + " FROM payments" + where +
+                                            " ORDER BY created_at DESC LIMIT $3 OFFSET $4",
+                                        f.status,
+                                        f.user_id,
+                                        limit,
+                                        offset);
+            Page p;
+            p.entries.reserve(rows.size());
+            for (const auto& row : rows)
+                p.entries.push_back(Domain::Payment::from_row(row));
+
+            auto cnt = txn.exec_params(std::string("SELECT COUNT(*) FROM payments") + where, f.status, f.user_id);
+            p.total = cnt.at(0).at(0).template as<long>();
+            return p;
+        });
+    }
+};
+
+/**
+ * @brief `billing_settings` — the single-row admin-editable rate/bounds
+ *        (migration 009). See Domain::BillingSettings's doc comment for why
+ *        this table exists (no pre-existing runtime-config mechanism was
+ *        found anywhere in this codebase).
+ */
+class BillingSettingsRepository {
+public:
+    /// The seeded row always exists after migration 009 runs — a missing row
+    /// is treated as a genuine server error (500 via with_repo_errors'
+    /// std::exception fallback), not a 404: this isn't a resource a caller
+    /// can fail to have created yet.
+    Domain::BillingSettings get(bool from_primary = false) {
+        auto query = [&](auto& txn) {
+            auto r = txn.exec(
+                "SELECT credits_per_unit, min_amount_cents, max_amount_cents, updated_at FROM billing_settings "
+                "WHERE id = 1");
+            if (r.empty())
+                throw std::runtime_error("billing_settings row missing — migration 009 did not seed it");
+            return Domain::BillingSettings::from_row(r[0]);
+        };
+        return from_primary ? Database::get().execute_read_primary(query) : Database::get().execute_read(query);
+    }
+
+    Domain::BillingSettings update(std::int64_t credits_per_unit,
+                                   std::int64_t min_amount_cents,
+                                   std::int64_t max_amount_cents) {
+        return Database::get().execute_write([&](auto& txn) {
+            auto r = txn.exec_params(
+                "UPDATE billing_settings SET credits_per_unit = $1, min_amount_cents = $2, max_amount_cents = $3 "
+                "WHERE id = 1 RETURNING credits_per_unit, min_amount_cents, max_amount_cents, updated_at",
+                credits_per_unit,
+                min_amount_cents,
+                max_amount_cents);
+            if (r.empty())
+                throw std::runtime_error("billing_settings row missing — migration 009 did not seed it");
+            return Domain::BillingSettings::from_row(r[0]);
+        });
+    }
 };
 
 }  // namespace Repositories

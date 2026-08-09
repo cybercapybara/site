@@ -620,7 +620,27 @@ private:
     // goes through `long` (this codebase's existing convention, e.g.
     // server.max_body_bytes in main.cpp) and is narrowed to std::int64_t
     // afterward, never read as std::int64_t directly.
+    //
+    // Task 6: the rate/bounds are now admin-editable at runtime via
+    // PUT /api/v1/admin/billing/settings, persisted in `billing_settings`
+    // (migration 009) — a redeploy-only config value can't satisfy that. The
+    // migration seeds that row with the exact same numbers config.json
+    // already shipped (100 / 100 / 100000), so this is the SAME effective
+    // rate for every environment until an admin actually changes it. Config
+    // is kept only as a defensive fallback for the (should-be-impossible
+    // once migrations have run) case of a missing row — never silently
+    // reading 0 and letting every top-up amount fail its range check.
     static void billing_limits(std::int64_t& rate, std::int64_t& min_cents, std::int64_t& max_cents) {
+        try {
+            Repositories::BillingSettingsRepository settings;
+            auto s = settings.get();
+            rate = s.credits_per_unit;
+            min_cents = s.min_amount_cents;
+            max_cents = s.max_amount_cents;
+            return;
+        } catch (const std::exception& e) {
+            spdlog::warn("billing_limits: billing_settings row unavailable, falling back to config: {}", e.what());
+        }
         auto& cfg = Config::get();
         rate = static_cast<std::int64_t>(cfg.get<long>("billing.credits_per_unit", "BILLING_CREDITS_PER_UNIT", 100));
         min_cents =

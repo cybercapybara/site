@@ -367,6 +367,96 @@ components:
           properties:
             handled: { type: boolean, description: "true if this event type drives real crediting/refund logic (whether or not it was a no-op replay); false for an ignored/unrecognized event type" }
 
+    # GET/POST/PATCH /api/v1/admin/billing/packages[/{id}]. Same shape as the
+    # user-facing BillingPackage — the admin view just isn't filtered to
+    # active=true.
+    AdminPackageResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/BillingPackage' }
+
+    AdminPackageListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/BillingPackage' }
+
+    # GET /api/v1/admin/billing/payments. Mirrors Domain::to_json(Payment).
+    AdminPaymentListResponse:
+      type: object
+      required: [data, total, limit, offset]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Payment' }
+        total:  { type: integer }
+        limit:  { type: integer }
+        offset: { type: integer }
+
+    Payment:
+      type: object
+      required:
+        - id
+        - user_id
+        - provider
+        - provider_order_id
+        - amount_cents
+        - currency
+        - credits_expected
+        - rate_snapshot
+        - status
+        - created_at
+        - updated_at
+      properties:
+        id:                  { type: string, format: uuid }
+        user_id:             { type: string, format: uuid }
+        provider:             { type: string }
+        provider_order_id:    { type: string }
+        provider_capture_id:  { type: ['string', 'null'] }
+        amount_cents:         { type: integer, format: int64 }
+        currency:             { type: string }
+        credits_expected:     { type: integer, format: int64 }
+        rate_snapshot:        { type: integer, format: int64 }
+        package_id:           { type: ['string', 'null'], format: uuid }
+        status:               { type: string, enum: [created, approved, captured, failed, refunded] }
+        failure_reason:       { type: ['string', 'null'] }
+        created_at:           { type: string }
+        updated_at:           { type: string }
+
+    # GET/PUT /api/v1/admin/billing/settings. Mirrors Domain::to_json(BillingSettings).
+    BillingSettings:
+      type: object
+      required: [credits_per_unit, min_amount_cents, max_amount_cents, updated_at]
+      properties:
+        credits_per_unit: { type: integer, format: int64, description: Credits granted per 100 cents on a custom-amount top-up }
+        min_amount_cents: { type: integer, format: int64 }
+        max_amount_cents: { type: integer, format: int64 }
+        updated_at:       { type: string }
+
+    BillingSettingsResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/BillingSettings' }
+
+    # POST /api/v1/admin/billing/users/{id}/adjust. Mirrors
+    # AdminBillingController::adjustWallet — deliberately does NOT echo the
+    # ledger row's full shape (no reference/kind/note round-trip needed by a
+    # caller that already knows what it just sent).
+    AdjustResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [balance, credited]
+          properties:
+            balance:  { type: integer, format: int64, description: Wallet balance AFTER this adjustment }
+            credited: { type: boolean, description: "false only if this exact adjustment somehow no-op'd (not expected in normal use — adjust() has no idempotency key)" }
+
 # -----------------------------------------------------------------------------
 paths:
   /:
@@ -1382,3 +1472,179 @@ paths:
         '401': { description: "Signature verification failed (malformed body, missing paypal-* headers, or PayPal reported the signature invalid) — nothing credited/refunded" }
         '404': { description: Billing module disabled }
         '500': { description: "PayPal's own verify-webhook-signature API was unreachable/non-2xx, OR a signature-valid event could not be processed (malformed shape, or a refund/reversal that couldn't be resolved/applied) — retry later; nothing was silently dropped" }
+
+  # ── Billing admin API (Task 6; require billing.enabled + full admin) ───────
+  /api/v1/admin/billing/payments:
+    get:
+      summary: List payments (admin)
+      description: Paged, newest first. Optional ?status= and ?user_id= filters (AND'd together when both are given).
+      tags: [admin, billing]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { name: status,  in: query, schema: { type: string, enum: [created, approved, captured, failed, refunded] } }
+        - { name: user_id, in: query, schema: { type: string, format: uuid } }
+        - { name: limit,   in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: offset,  in: query, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        '200':
+          description: Payment page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminPaymentListResponse' }
+        '400': { description: user_id filter is not a valid UUID }
+        '403': { description: Not an admin }
+        '404': { description: Billing module disabled }
+  /api/v1/admin/billing/packages:
+    get:
+      summary: List every top-up package, active and inactive (admin)
+      tags: [admin, billing]
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: Full package catalogue
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminPackageListResponse' }
+        '403': { description: Not an admin }
+        '404': { description: Billing module disabled }
+    post:
+      summary: Create a top-up package (admin)
+      tags: [admin, billing]
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, amount_cents, credits]
+              properties:
+                title:        { type: string, minLength: 1, maxLength: 200 }
+                amount_cents: { type: integer, format: int64, minimum: 1 }
+                credits:      { type: integer, format: int64, minimum: 1 }
+                active:       { type: boolean, default: true }
+                sort:         { type: integer, default: 0 }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminPackageResponse' }
+        '400': { description: Validation failed }
+        '403': { description: Not an admin }
+        '404': { description: Billing module disabled }
+  /api/v1/admin/billing/packages/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      summary: Update a top-up package — partial; any of title/amount_cents/credits/active/sort (admin)
+      tags: [admin, billing]
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:        { type: string, minLength: 1, maxLength: 200 }
+                amount_cents: { type: integer, format: int64, minimum: 1 }
+                credits:      { type: integer, format: int64, minimum: 1 }
+                active:       { type: boolean }
+                sort:         { type: integer }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminPackageResponse' }
+        '400': { description: Empty patch, invalid id, or validation failed }
+        '403': { description: Not an admin }
+        '404': { description: "Billing module disabled, or no such package" }
+    delete:
+      summary: Delete a top-up package (admin)
+      tags: [admin, billing]
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessageResponse' }
+        '400': { description: Invalid id }
+        '403': { description: Not an admin }
+        '404': { description: "Billing module disabled, or no such package" }
+  /api/v1/admin/billing/settings:
+    get:
+      summary: Read the billing rate/bounds settings (admin)
+      tags: [admin, billing]
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: Current settings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BillingSettingsResponse' }
+        '403': { description: Not an admin }
+        '404': { description: Billing module disabled }
+    put:
+      summary: Replace the billing rate/bounds settings (admin)
+      description: >
+        A full replace — all three fields are required. Takes effect for the
+        NEXT top-up computed after this call; an in-flight or already-created
+        payment keeps the rate_snapshot/credits_expected it was created with
+        (see Billing::credit_capture — unaffected by this endpoint).
+      tags: [admin, billing]
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [credits_per_unit, min_amount_cents, max_amount_cents]
+              properties:
+                credits_per_unit: { type: integer, format: int64, minimum: 1 }
+                min_amount_cents: { type: integer, format: int64, minimum: 1 }
+                max_amount_cents: { type: integer, format: int64, minimum: 1 }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BillingSettingsResponse' }
+        '400': { description: "Missing/invalid field, or max_amount_cents < min_amount_cents" }
+        '403': { description: Not an admin }
+        '404': { description: Billing module disabled }
+  /api/v1/admin/billing/users/{id}/adjust:
+    post:
+      summary: Manually adjust a user's wallet balance (admin)
+      description: >
+        Routes through Billing::adjust — the only code allowed to write
+        wallet_entries/wallet_balances. note is mandatory (non-empty);
+        created_by on the resulting ledger row is always the authenticated
+        admin's own id, never a client-supplied value. Writes an audit_log row.
+      tags: [admin, billing]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid }, description: Target user id }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [delta_credits, note]
+              properties:
+                delta_credits: { type: integer, format: int64, description: "Signed; positive credits, negative debits. Zero is refused (400)." }
+                note:          { type: string, minLength: 1, maxLength: 2000 }
+      responses:
+        '200':
+          description: Adjusted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdjustResponse' }
+        '400': { description: "Empty/missing note, zero delta_credits, malformed user/admin id, or invalid id path param" }
+        '403': { description: Not an admin }
+        '404': { description: "Billing module disabled, or no such user" }
+        '409': { description: A negative delta_credits would drive the balance below zero }

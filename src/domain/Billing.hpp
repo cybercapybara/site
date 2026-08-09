@@ -83,6 +83,40 @@ inline void to_json(nlohmann::json& j, const Package& p) {
 }
 
 /**
+ * @brief The single-row admin-editable billing rate/bounds. Mirrors
+ *        `billing_settings` (migration 009). Read by
+ *        BillingController::billing_limits() (user-facing top-up + package
+ *        list) and written only by Api::AdminBillingController's settings
+ *        endpoint — see src/repositories/BillingRepository.hpp's
+ *        BillingSettingsRepository.
+ */
+struct BillingSettings {
+    std::int64_t credits_per_unit{100};
+    std::int64_t min_amount_cents{100};
+    std::int64_t max_amount_cents{100000};
+    std::string updated_at;
+
+    template <typename Row>
+    static BillingSettings from_row(const Row& row) {
+        BillingSettings s;
+        s.credits_per_unit = row["credits_per_unit"].template as<std::int64_t>();
+        s.min_amount_cents = row["min_amount_cents"].template as<std::int64_t>();
+        s.max_amount_cents = row["max_amount_cents"].template as<std::int64_t>();
+        s.updated_at = Utils::Time::pg_to_iso8601(row["updated_at"].template as<std::string>());
+        return s;
+    }
+};
+
+inline void to_json(nlohmann::json& j, const BillingSettings& s) {
+    j = nlohmann::json{
+        {"credits_per_unit", s.credits_per_unit},
+        {"min_amount_cents", s.min_amount_cents},
+        {"max_amount_cents", s.max_amount_cents},
+        {"updated_at", s.updated_at},
+    };
+}
+
+/**
  * @brief A PayPal order/payment attempt. Mirrors `payments`. `credits_expected`
  *        and `rate_snapshot` are frozen at creation — a later rate change
  *        cannot alter an in-flight order (see Billing::credit_capture).

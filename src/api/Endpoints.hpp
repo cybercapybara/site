@@ -83,6 +83,14 @@ inline const std::vector<EndpointInfo>& get_endpoints() {
         {"POST", "/api/v1/billing/topup", "Start a PayPal top-up (package or custom amount)"},
         {"POST", "/api/v1/billing/capture", "Capture an approved PayPal order and credit your wallet"},
         {"POST", "/api/v1/billing/paypal/webhook", "PayPal webhook: verified capture/refund events (public)"},
+        {"GET", "/api/v1/admin/billing/payments", "Admin: list payments (paged, filter by status/user)"},
+        {"GET", "/api/v1/admin/billing/packages", "Admin: list every top-up package (active and inactive)"},
+        {"POST", "/api/v1/admin/billing/packages", "Admin: create a top-up package"},
+        {"PATCH", "/api/v1/admin/billing/packages/{id}", "Admin: update a top-up package"},
+        {"DELETE", "/api/v1/admin/billing/packages/{id}", "Admin: delete a top-up package"},
+        {"GET", "/api/v1/admin/billing/settings", "Admin: read the billing rate/bounds settings"},
+        {"PUT", "/api/v1/admin/billing/settings", "Admin: update the billing rate/bounds settings"},
+        {"POST", "/api/v1/admin/billing/users/{id}/adjust", "Admin: manually adjust a user's wallet balance"},
     };
     return endpoints;
 }
