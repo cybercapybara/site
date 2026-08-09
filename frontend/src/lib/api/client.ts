@@ -365,6 +365,12 @@ interface ApiSurface {
   ): Promise<ApiResult<ResponseOf<P, 'patch'>>>;
   PATCH(path: string, opts?: RequestOptions): Promise<ApiResult<unknown>>;
 
+  PUT<P extends PathsWith<'put'>>(
+    path: P,
+    opts?: TypedOptions<P, 'put'>,
+  ): Promise<ApiResult<ResponseOf<P, 'put'>>>;
+  PUT(path: string, opts?: RequestOptions): Promise<ApiResult<unknown>>;
+
   DELETE<P extends PathsWith<'delete'>>(
     path: P,
     opts?: TypedOptions<P, 'delete'>,
@@ -389,6 +395,12 @@ interface ApiSurface {
   ): Promise<ResponseOf<P, 'patch'>>;
   patchJson<T = unknown>(path: string, opts?: RequestOptions): Promise<T>;
 
+  putJson<P extends PathsWith<'put'>>(
+    path: P,
+    opts?: TypedOptions<P, 'put'>,
+  ): Promise<ResponseOf<P, 'put'>>;
+  putJson<T = unknown>(path: string, opts?: RequestOptions): Promise<T>;
+
   deleteJson<P extends PathsWith<'delete'>>(
     path: P,
     opts?: TypedOptions<P, 'delete'>,
@@ -400,10 +412,12 @@ export const api: ApiSurface = {
   GET: (path: string, opts?: RequestOptions) => request('GET', path, opts),
   POST: (path: string, opts?: RequestOptions) => request('POST', path, opts),
   PATCH: (path: string, opts?: RequestOptions) => request('PATCH', path, opts),
+  PUT: (path: string, opts?: RequestOptions) => request('PUT', path, opts),
   DELETE: (path: string, opts?: RequestOptions) => request('DELETE', path, opts),
   getJson: (path: string, opts?: RequestOptions) => fetchJson('GET', path, opts),
   postJson: (path: string, opts?: RequestOptions) => fetchJson('POST', path, opts),
   patchJson: (path: string, opts?: RequestOptions) => fetchJson('PATCH', path, opts),
+  putJson: (path: string, opts?: RequestOptions) => fetchJson('PUT', path, opts),
   deleteJson: (path: string, opts?: RequestOptions) => fetchJson('DELETE', path, opts),
 } as ApiSurface;
 

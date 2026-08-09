@@ -37,3 +37,25 @@ export type RoleDetailResponse = Schemas['RoleDetailResponse'];
 export type InviteResponse = Schemas['InviteResponse'];
 /** Generic { message } envelope (logout, delete, …). */
 export type MessageResponse = Schemas['MessageResponse'];
+
+/**
+ * Billing (Task 8 wallet/PayPal top-up). credits_per_unit/min/max come back
+ * on the SAME GET /billing/packages response as the package list — see
+ * BillingPackageListResponse. WalletResponse.data.balance and every
+ * delta_credits are integer "credits" (the internal wallet unit), never
+ * divided by 100; amount_cents fields are real-world USD cents — see
+ * frontend/src/lib/money.ts for the render-boundary conversion rules.
+ *
+ * NOTE: the admin billing schemas (AdminPackage*, Payment, BillingSettings*,
+ * AdjustResponse) are intentionally NOT aliased here — docs/openapi.yaml has
+ * carried them since Task 6 (commit 25737f9) but schema.gen.ts hasn't been
+ * regenerated since Task 6/7 landed, so `components['schemas']` doesn't have
+ * them yet. frontend/src/pages/admin/Billing.tsx hand-types those locally
+ * until the autofix workflow (regenerate OpenAPI TS schema) is dispatched.
+ */
+export type BillingPackage = Schemas['BillingPackage'];
+export type BillingPackageListResponse = Schemas['BillingPackageListResponse'];
+export type PublicWalletEntry = Schemas['PublicWalletEntry'];
+export type WalletResponse = Schemas['WalletResponse'];
+export type TopupResponse = Schemas['TopupResponse'];
+export type CaptureResponse = Schemas['CaptureResponse'];
