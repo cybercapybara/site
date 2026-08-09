@@ -160,6 +160,22 @@
   "content": {
     "enabled": "${CONTENT_ENABLED:-false}"
   },
+  "billing": {
+    "enabled": "${BILLING_ENABLED:-false}",
+    "provider": "paypal",
+    "currency": "USD",
+    "credits_per_unit": 100,
+    "min_amount_cents": 100,
+    "max_amount_cents": 100000,
+    "paypal": {
+      "environment": "${PAYPAL_ENV:-sandbox}",
+      "client_id": "${PAYPAL_CLIENT_ID:-}",
+      "client_secret": "${PAYPAL_CLIENT_SECRET:-}",
+      "webhook_id": "${PAYPAL_WEBHOOK_ID:-}",
+      "return_url": "${PAYPAL_RETURN_URL:-}",
+      "cancel_url": "${PAYPAL_CANCEL_URL:-}"
+    }
+  },
   "worker": {
     "id": "worker-1",
     "types": ["default"],
