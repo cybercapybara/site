@@ -21,6 +21,9 @@ Live-deploy fixes for the 1.5.0 content module.
   default 413'd photo uploads before they reached the backend.
 - The JSON content-type gate exempts `multipart/form-data` — it previously
   415'd every upload before UploadController's own validation ran.
+- Runtime image ships `ca-certificates` — without the CA bundle every
+  outbound TLS from the app failed (first hit: SMTP STARTTLS to the mail
+  relay, "Problem with the SSL CA cert").
 
 ## [1.5.0] — 2026-08-08
 
