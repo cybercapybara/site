@@ -37,6 +37,17 @@ struct UserNotFound : NotFoundError {
     UserNotFound() : NotFoundError("user") {}
 };
 
+/**
+ * @brief → 409. Migration 007 added ON DELETE RESTRICT foreign keys from
+ *        `payments`, `wallet_entries` and `wallet_balances` to `users` — a
+ *        user with any billing history can no longer be hard-deleted.
+ *        Mirrors RoleRepository::RoleInUse exactly.
+ */
+struct UserHasBillingHistory : ConflictError {
+    UserHasBillingHistory()
+        : ConflictError("user_has_billing_history", "This user has payment or wallet history and cannot be deleted") {}
+};
+
 class UserRepository {
 public:
     /**
@@ -272,13 +283,28 @@ public:
         });
     }
 
+    /**
+     * @brief Delete a user. Throws UserNotFound if it doesn't exist,
+     *        UserHasBillingHistory on FK violation (SQLSTATE 23503) — a
+     *        payment or wallet_entries/wallet_balances row still references
+     *        this user (ON DELETE RESTRICT, migration 007). Without this
+     *        translation the raw pqxx::sql_error would surface as a bare 500
+     *        instead of a 409 the admin API can act on.
+     */
     void remove(const std::string& id) {
-        Database::get().execute_write([&](auto& txn) {
-            auto r = txn.exec_params("DELETE FROM users WHERE id = $1 RETURNING id", id);
-            if (r.empty())
-                throw UserNotFound{};
-            return 0;
-        });
+        detail::translate_sql(
+            [&] {
+                return Database::get().execute_write([&](auto& txn) {
+                    auto r = txn.exec_params("DELETE FROM users WHERE id = $1 RETURNING id", id);
+                    if (r.empty())
+                        throw UserNotFound{};
+                    return 0;
+                });
+            },
+            [](std::string_view ss) {
+                if (ss == "23503")
+                    throw UserHasBillingHistory{};
+            });
     }
 
     /**
