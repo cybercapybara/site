@@ -356,7 +356,8 @@ public:
         // runs inside ONE try/catch. See this method's own doc comment above
         // for the full 200/401/5xx breakdown.
         try {
-            json event = json::parse(raw_body);  // defensive re-parse; verify_webhook_signature() already required valid JSON to return true.
+            json event = json::parse(raw_body);  // defensive re-parse; verify_webhook_signature() already required
+                                                 // valid JSON to return true.
 
             const std::string event_id = event.value("id", std::string());
             const std::string event_type = event.value("event_type", std::string());
@@ -558,8 +559,8 @@ private:
                 kind_label,
                 refund_id,
                 event_id);
-            throw std::runtime_error("billing webhook: unresolvable capture id for " + std::string(kind_label) +
-                                     " " + refund_id);
+            throw std::runtime_error("billing webhook: unresolvable capture id for " + std::string(kind_label) + " " +
+                                     refund_id);
         }
 
         try {

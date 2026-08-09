@@ -2754,13 +2754,15 @@ export interface paths {
          *       * PAYMENT.CAPTURE.COMPLETED credits the wallet (idempotent — a
          *         capture already credited via POST .../capture, including one
          *         that resolves a PENDING return-flow capture, is a 200 no-op).
-         *       * PAYMENT.CAPTURE.REFUNDED refunds via the same logic as
-         *         Billing::refund_capture, keyed on PayPal's own refund id as the
-         *         idempotency marker.
-         *       * Any other event type (including PAYMENT.CAPTURE.REVERSED — a
-         *         known gap, see BillingController::handleCaptureReversed) is
-         *         acknowledged with 200 and NOT acted on.
-         *     200 is returned for every signature-valid event, handled or not.
+         *       * PAYMENT.CAPTURE.REFUNDED (merchant refund) and
+         *         PAYMENT.CAPTURE.REVERSED (PayPal claws back a capture —
+         *         chargeback/dispute/risk) both DEBIT the wallet via the same
+         *         Billing::refund_capture logic, keyed on the event's own id as
+         *         the idempotency marker — see BillingController::
+         *         handleCaptureRefunded's doc comment for why both event types
+         *         share one handler.
+         *       * Any other event type is acknowledged with 200 and NOT acted on.
+         *     200 is returned for every signature-valid event that was either applied or safely no-op'd; a signature-valid event this handler FAILED to process (a malformed body, or a refund/reversal it couldn't resolve/apply) answers 5xx so PayPal retries instead of the event being silently dropped.
          */
         post: {
             parameters: {
@@ -2798,8 +2800,480 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description PayPal's own verify-webhook-signature API was unreachable or answered non-2xx — retry later */
+                /** @description PayPal's own verify-webhook-signature API was unreachable/non-2xx, OR a signature-valid event could not be processed (malformed shape, or a refund/reversal that couldn't be resolved/applied) — retry later; nothing was silently dropped */
                 500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/billing/payments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List payments (admin)
+         * @description Paged, newest first. Optional ?status= and ?user_id= filters (AND'd together when both are given).
+         */
+        get: {
+            parameters: {
+                query?: {
+                    status?: "created" | "approved" | "captured" | "failed" | "refunded";
+                    user_id?: string;
+                    limit?: number;
+                    offset?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Payment page */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminPaymentListResponse"];
+                    };
+                };
+                /** @description user_id filter is not a valid UUID */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not an admin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Billing module disabled */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/billing/packages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List every top-up package, active and inactive (admin) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Full package catalogue */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminPackageListResponse"];
+                    };
+                };
+                /** @description Not an admin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Billing module disabled */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        /** Create a top-up package (admin) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        title: string;
+                        /** Format: int64 */
+                        amount_cents: number;
+                        /** Format: int64 */
+                        credits: number;
+                        /** @default true */
+                        active?: boolean;
+                        /** @default 0 */
+                        sort?: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminPackageResponse"];
+                    };
+                };
+                /** @description Validation failed */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not an admin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Billing module disabled */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/billing/packages/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a top-up package (admin) */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Deleted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MessageResponse"];
+                    };
+                };
+                /** @description Invalid id */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not an admin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Billing module disabled, or no such package */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        /** Update a top-up package — partial; any of title/amount_cents/credits/active/sort (admin) */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        title?: string;
+                        /** Format: int64 */
+                        amount_cents?: number;
+                        /** Format: int64 */
+                        credits?: number;
+                        active?: boolean;
+                        sort?: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminPackageResponse"];
+                    };
+                };
+                /** @description Empty patch */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not an admin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Billing module disabled, or no such package */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/api/v1/admin/billing/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the billing rate/bounds settings (admin) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Current settings */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BillingSettingsResponse"];
+                    };
+                };
+                /** @description Not an admin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Billing module disabled */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        /**
+         * Replace the billing rate/bounds settings (admin)
+         * @description A full replace — all three fields are required. Takes effect for the NEXT top-up computed after this call; an in-flight or already-created payment keeps the rate_snapshot/credits_expected it was created with (see Billing::credit_capture — unaffected by this endpoint).
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** Format: int64 */
+                        credits_per_unit: number;
+                        /** Format: int64 */
+                        min_amount_cents: number;
+                        /** Format: int64 */
+                        max_amount_cents: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BillingSettingsResponse"];
+                    };
+                };
+                /** @description Missing/invalid field, or max_amount_cents < min_amount_cents */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not an admin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Billing module disabled */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/billing/users/{id}/adjust": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Manually adjust a user's wallet balance (admin)
+         * @description Routes through Billing::adjust — the only code allowed to write wallet_entries/wallet_balances. note is mandatory (non-empty); created_by on the resulting ledger row is always the authenticated admin's own id, never a client-supplied value. Writes an audit_log row.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Target user id */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /**
+                         * Format: int64
+                         * @description Signed; positive credits, negative debits. Zero is refused (400).
+                         */
+                        delta_credits: number;
+                        note: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Adjusted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdjustResponse"];
+                    };
+                };
+                /** @description Empty/missing note, zero delta_credits, malformed user/admin id, or invalid id path param */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not an admin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Billing module disabled, or no such user */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description A negative delta_credits would drive the balance below zero */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -3046,6 +3520,67 @@ export interface components {
             data: {
                 /** @description true if this event type drives real crediting/refund logic (whether or not it was a no-op replay); false for an ignored/unrecognized event type */
                 handled: boolean;
+            };
+        };
+        AdminPackageResponse: {
+            data: components["schemas"]["BillingPackage"];
+        };
+        AdminPackageListResponse: {
+            data: components["schemas"]["BillingPackage"][];
+        };
+        AdminPaymentListResponse: {
+            data: components["schemas"]["Payment"][];
+            total: number;
+            limit: number;
+            offset: number;
+        };
+        Payment: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            user_id: string;
+            provider: string;
+            provider_order_id: string;
+            provider_capture_id?: string | null;
+            /** Format: int64 */
+            amount_cents: number;
+            currency: string;
+            /** Format: int64 */
+            credits_expected: number;
+            /** Format: int64 */
+            rate_snapshot: number;
+            /** Format: uuid */
+            package_id?: string | null;
+            /** @enum {string} */
+            status: "created" | "approved" | "captured" | "failed" | "refunded";
+            failure_reason?: string | null;
+            created_at: string;
+            updated_at: string;
+        };
+        BillingSettings: {
+            /**
+             * Format: int64
+             * @description Credits granted per 100 cents on a custom-amount top-up
+             */
+            credits_per_unit: number;
+            /** Format: int64 */
+            min_amount_cents: number;
+            /** Format: int64 */
+            max_amount_cents: number;
+            updated_at: string;
+        };
+        BillingSettingsResponse: {
+            data: components["schemas"]["BillingSettings"];
+        };
+        AdjustResponse: {
+            data: {
+                /**
+                 * Format: int64
+                 * @description Wallet balance AFTER this adjustment
+                 */
+                balance: number;
+                /** @description false only if this exact adjustment somehow no-op'd (not expected in normal use — adjust() has no idempotency key) */
+                credited: boolean;
             };
         };
     };

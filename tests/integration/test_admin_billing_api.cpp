@@ -266,13 +266,15 @@ TEST_F(AdminBillingApiTest, PackageCrudRoundtrip) {
     ASSERT_EQ(list_body["data"].size(), 1u);
     EXPECT_FALSE(list_body["data"][0]["active"].get<bool>());
 
-    controller.deletePackage(TestHelpers::authed(admin, Delete), [&](const HttpResponsePtr& r) { resp = r; }, id);
+    controller.deletePackage(
+        TestHelpers::authed(admin, Delete), [&](const HttpResponsePtr& r) { resp = r; }, id);
     ASSERT_EQ(resp->statusCode(), k200OK);
     EXPECT_EQ(audit_count("billing.package.delete", id), 1);
     EXPECT_FALSE(packages.find(id).has_value());
 
     // Deleting again (unknown id) -> 404, not a second audit row.
-    controller.deletePackage(TestHelpers::authed(admin, Delete), [&](const HttpResponsePtr& r) { resp = r; }, id);
+    controller.deletePackage(
+        TestHelpers::authed(admin, Delete), [&](const HttpResponsePtr& r) { resp = r; }, id);
     EXPECT_EQ(resp->statusCode(), k404NotFound);
     EXPECT_EQ(audit_count("billing.package.delete", id), 1);
 }
@@ -280,9 +282,8 @@ TEST_F(AdminBillingApiTest, PackageCrudRoundtrip) {
 TEST_F(AdminBillingApiTest, CreatePackageRejectsInvalidFields) {
     auto admin = seed_admin();
     HttpResponsePtr resp;
-    controller.createPackage(
-        TestHelpers::authed_json(admin, json{{"title", ""}, {"amount_cents", 0}, {"credits", -5}}),
-        [&](const HttpResponsePtr& r) { resp = r; });
+    controller.createPackage(TestHelpers::authed_json(admin, json{{"title", ""}, {"amount_cents", 0}, {"credits", -5}}),
+                             [&](const HttpResponsePtr& r) { resp = r; });
     EXPECT_EQ(resp->statusCode(), k400BadRequest);
 }
 
@@ -309,9 +310,12 @@ TEST_F(AdminBillingApiTest, SettingsUpdateChangesComputedCredits) {
     auto user = seed_user("buyer@example.com");
 
     // An in-flight payment created under the OLD rate (100).
-    auto old_payment =
-        seed_payment(user.subject, "ORDER-OLD", "created", /*amount_cents=*/1000, /*credits_expected=*/1000,
-                    /*rate_snapshot=*/100);
+    auto old_payment = seed_payment(user.subject,
+                                    "ORDER-OLD",
+                                    "created",
+                                    /*amount_cents=*/1000,
+                                    /*credits_expected=*/1000,
+                                    /*rate_snapshot=*/100);
 
     HttpResponsePtr resp;
     controller.getSettings(TestHelpers::authed(admin), [&](const HttpResponsePtr& r) { resp = r; });
@@ -368,9 +372,8 @@ TEST_F(AdminBillingApiTest, UpdateSettingsRejectsInvalidBounds) {
     EXPECT_EQ(resp->statusCode(), k400BadRequest);
 
     // Missing field.
-    controller.updateSettings(
-        TestHelpers::authed_json(admin, json{{"credits_per_unit", 100}}, Put),
-        [&](const HttpResponsePtr& r) { resp = r; });
+    controller.updateSettings(TestHelpers::authed_json(admin, json{{"credits_per_unit", 100}}, Put),
+                              [&](const HttpResponsePtr& r) { resp = r; });
     EXPECT_EQ(resp->statusCode(), k400BadRequest);
 
     // Non-positive.

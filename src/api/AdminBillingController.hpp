@@ -296,8 +296,7 @@ public:
         // The cross-field bound only makes sense once both individual fields
         // already checked out — deliberately gated on !errs.any(), unlike the
         // independent per-field checks above.
-        if (!errs.any() &&
-            body["max_amount_cents"].get<std::int64_t>() < body["min_amount_cents"].get<std::int64_t>())
+        if (!errs.any() && body["max_amount_cents"].get<std::int64_t>() < body["min_amount_cents"].get<std::int64_t>())
             errs.add("max_amount_cents", "below_min", "max_amount_cents must be >= min_amount_cents");
         if (errs.any()) {
             callback(Validation::response_400(errs));
@@ -363,11 +362,8 @@ public:
 
         with_repo_errors(callback, "admin billing adjustWallet", [&] {
             auto result = Billing::adjust(id, delta_credits, note, admin_id);
-            Security::Audit::record(admin_id,
-                                    "billing.wallet.adjust",
-                                    "user",
-                                    id,
-                                    {{"delta_credits", delta_credits}, {"note", note}});
+            Security::Audit::record(
+                admin_id, "billing.wallet.adjust", "user", id, {{"delta_credits", delta_credits}, {"note", note}});
             callback(Response::ok({{"data", {{"balance", result.balance}, {"credited", result.credited}}}}));
         });
     }

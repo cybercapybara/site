@@ -263,12 +263,11 @@ protected:
                                        const std::string& capture_id,
                                        const std::string& amount_value,
                                        const std::string& currency = "USD") {
-        return capture_refunded_event_with_href(
-            event_id,
-            refund_id,
-            "https://api.sandbox.paypal.com/v2/payments/captures/" + capture_id,
-            amount_value,
-            currency);
+        return capture_refunded_event_with_href(event_id,
+                                                refund_id,
+                                                "https://api.sandbox.paypal.com/v2/payments/captures/" + capture_id,
+                                                amount_value,
+                                                currency);
     }
 
     // Same shape, but with a caller-supplied "up" link href — lets tests
@@ -866,14 +865,14 @@ TEST_F(BillingApiTest, WebhookReversalDebitsWalletLikeARefund) {
     ASSERT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 1000);
 
     int status = 0;
-    auto body = do_webhook(capture_refunded_event_with_href(
-                               "WH-REVERSED-1",
-                               "REVERSAL-1",
-                               "https://api.sandbox.paypal.com/v2/payments/captures/" + fake->next_capture_id,
-                               "10.00",
-                               "USD",
-                               "PAYMENT.CAPTURE.REVERSED"),
-                           &status);
+    auto body = do_webhook(
+        capture_refunded_event_with_href("WH-REVERSED-1",
+                                         "REVERSAL-1",
+                                         "https://api.sandbox.paypal.com/v2/payments/captures/" + fake->next_capture_id,
+                                         "10.00",
+                                         "USD",
+                                         "PAYMENT.CAPTURE.REVERSED"),
+        &status);
     EXPECT_EQ(status, k200OK);
     EXPECT_TRUE(body["data"]["handled"].get<bool>());
 
@@ -910,9 +909,9 @@ TEST_F(BillingApiTest, WebhookRefundThenReversalDoesNotDoubleDebitPastAmountCent
 
     // Partial merchant refund: 600 of 1000 cents -> 600 of 1000 credits.
     int refund_status = 0;
-    auto refund_body = do_webhook(
-        capture_refunded_event("WH-PARTIAL-REFUND-1", "REFUND-PARTIAL-1", fake->next_capture_id, "6.00"),
-        &refund_status);
+    auto refund_body =
+        do_webhook(capture_refunded_event("WH-PARTIAL-REFUND-1", "REFUND-PARTIAL-1", fake->next_capture_id, "6.00"),
+                   &refund_status);
     ASSERT_EQ(refund_status, k200OK);
     ASSERT_TRUE(refund_body["data"]["handled"].get<bool>());
     ASSERT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 400);  // 1000 - 600
@@ -920,15 +919,14 @@ TEST_F(BillingApiTest, WebhookRefundThenReversalDoesNotDoubleDebitPastAmountCent
     // PayPal reverses the SAME capture for another 600 cents, DISTINCT id —
     // cumulative (600 + 600 = 1200) exceeds amount_cents (1000).
     int reversal_status = 0;
-    auto reversal_body = do_webhook(capture_refunded_event_with_href(
-                                        "WH-REVERSAL-AFTER-REFUND-1",
-                                        "REVERSAL-AFTER-REFUND-1",  // distinct from REFUND-PARTIAL-1
-                                        "https://api.sandbox.paypal.com/v2/payments/captures/" +
-                                            fake->next_capture_id,
-                                        "6.00",
-                                        "USD",
-                                        "PAYMENT.CAPTURE.REVERSED"),
-                                    &reversal_status);
+    auto reversal_body = do_webhook(
+        capture_refunded_event_with_href("WH-REVERSAL-AFTER-REFUND-1",
+                                         "REVERSAL-AFTER-REFUND-1",  // distinct from REFUND-PARTIAL-1
+                                         "https://api.sandbox.paypal.com/v2/payments/captures/" + fake->next_capture_id,
+                                         "6.00",
+                                         "USD",
+                                         "PAYMENT.CAPTURE.REVERSED"),
+        &reversal_status);
     EXPECT_EQ(reversal_status, k200OK);
     EXPECT_TRUE(reversal_body["data"]["handled"].get<bool>());
 
@@ -1013,11 +1011,11 @@ TEST_F(BillingApiTest, WebhookRefundWithUnresolvableCaptureIdReturns5xx) {
     ASSERT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 1000);
 
     json event = {{"id", "WH-REFUND-NOLINK-1"},
-                 {"event_type", "PAYMENT.CAPTURE.REFUNDED"},
-                 {"resource",
-                  {{"id", "REFUND-NOLINK-1"},
-                   {"amount", {{"value", "10.00"}, {"currency_code", "USD"}}},
-                   {"links", json::array()}}}};
+                  {"event_type", "PAYMENT.CAPTURE.REFUNDED"},
+                  {"resource",
+                   {{"id", "REFUND-NOLINK-1"},
+                    {"amount", {{"value", "10.00"}, {"currency_code", "USD"}}},
+                    {"links", json::array()}}}};
     int status = 0;
     auto body = do_webhook(event, &status);
     EXPECT_GE(status, 500);
