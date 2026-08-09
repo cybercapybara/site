@@ -18,23 +18,47 @@ import type { DlqListResponse, Job } from '@/lib/api/types';
 const PER_PAGE = 20;
 
 /**
- * Jaeger UI base for the "Open trace" deep link. The SPA image is built once and
- * deployed to every env, so a build-time URL can't be right everywhere. Resolve
- * at RUNTIME from the current origin using the cpp-env umbrella host convention
- * (`app.<env>.<domain>` → `jaeger.<env>.<domain>`); fall back to the docker-compose
- * Jaeger for local dev. A build-time VITE_TRACE_UI_URL still wins for custom infra.
+ * "Open trace" deep link. The SPA image is built once and deployed everywhere,
+ * so the URL is resolved at RUNTIME from `window.__TRACE_UI__` — a one-line
+ * script the deployment injects (see the cpp-frontend chart's `traceUi` value);
+ * a build-time VITE_TRACE_UI_URL still wins for custom infra.
+ *
+ * The value is a TEMPLATE containing `{traceId}`, so any backend works:
+ *   Jaeger   https://jaeger.example.com/trace/{traceId}
+ *   Grafana  https://grafana.example.com/explore?schemaVersion=1&panes=…{traceId}…
+ * Without a configured template the button is not rendered at all — better no
+ * link than a link to someone else's domain (a naive `app.<env>.<domain>` →
+ * `jaeger.<env>.<domain>` label swap turned `cybercapybara.kz` into
+ * `jaeger.kz`, a stranger's site).
  */
-function resolveTraceUiUrl(): string {
-  if (import.meta.env.VITE_TRACE_UI_URL) return import.meta.env.VITE_TRACE_UI_URL;
-  if (typeof window === 'undefined') return 'http://localhost:16686';
-  const { hostname, protocol } = window.location;
-  if (hostname === 'localhost' || hostname === '127.0.0.1') return 'http://localhost:16686';
-  const labels = hostname.split('.');
-  labels[0] = 'jaeger'; // app.<env>.<domain> -> jaeger.<env>.<domain>
-  return `${protocol}//${labels.join('.')}`;
+declare global {
+  interface Window {
+    __TRACE_UI__?: string;
+  }
 }
 
-const TRACE_UI_URL = resolveTraceUiUrl();
+function resolveTraceUiTemplate(): string | null {
+  const configured =
+    (typeof window !== 'undefined' ? window.__TRACE_UI__ : undefined) ||
+    import.meta.env.VITE_TRACE_UI_URL;
+  if (configured) return configured.includes('{traceId}') ? configured : `${configured}/trace/{traceId}`;
+  if (typeof window !== 'undefined') {
+    const { hostname } = window.location;
+    // Local dev: the compose stack ships Jaeger on 16686.
+    if (hostname === 'localhost' || hostname === '127.0.0.1')
+      return 'http://localhost:16686/trace/{traceId}';
+  }
+  return null;
+}
+
+const TRACE_UI_TEMPLATE = resolveTraceUiTemplate();
+
+/** All-zero trace ids mean "no trace was recorded" — never link them. */
+function traceLink(traceId: string | undefined): string | null {
+  if (!traceId || !TRACE_UI_TEMPLATE) return null;
+  if (/^0+$/.test(traceId)) return null;
+  return TRACE_UI_TEMPLATE.replace('{traceId}', encodeURIComponent(traceId));
+}
 
 // Thin-bordered, low-chroma badges that read on both themes. Dark-first
 // (the app default), with a light-mode fallback that matches the palette.
@@ -173,10 +197,10 @@ function JobDetailCard({ job, onClose }: { job: Job; onClose: () => void }) {
       <CardHeader className="flex flex-row items-center justify-between space-y-0">
         <CardTitle className="font-mono text-base">{job.id}</CardTitle>
         <div className="flex gap-2">
-          {job.trace_id && (
+          {traceLink(job.trace_id) && (
             <Button asChild size="sm" variant="outline">
               <a
-                href={`${TRACE_UI_URL}/trace/${job.trace_id}`}
+                href={traceLink(job.trace_id)!}
                 target="_blank"
                 rel="noopener noreferrer"
               >

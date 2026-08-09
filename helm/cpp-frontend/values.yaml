@@ -22,6 +22,15 @@ backend:
   port: 8080
 
 # ---------------------------------------------------------------
+# "Open trace" deep link shown on admin Jobs. Runtime-injected (served as
+# /trace-ui.js), so one image works in every environment. MUST contain the
+# {traceId} placeholder. Empty → the button is hidden entirely.
+#   Jaeger:  https://jaeger.example.com/trace/{traceId}
+#   Grafana: https://grafana.example.com/explore?schemaVersion=1&panes=%7B%22a%22%3A%7B%22datasource%22%3A%22tempo%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22query%22%3A%22{traceId}%22%2C%22queryType%22%3A%22traceql%22%7D%5D%7D%7D&orgId=1
+# ---------------------------------------------------------------
+traceUi: ""
+
+# ---------------------------------------------------------------
 # Networking — Service + Ingress (the frontend is the single entry point;
 # it serves the SPA and proxies /api itself, so the ingress only routes "/").
 # ---------------------------------------------------------------

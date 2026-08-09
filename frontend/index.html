@@ -13,6 +13,8 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Runtime config injected by the deployment (see cpp-frontend chart traceUi); 404 in dev is fine. -->
+    <script src="/trace-ui.js"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

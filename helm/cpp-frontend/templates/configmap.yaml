@@ -18,6 +18,16 @@ data:
         server_name  _;
 
         location = /healthz { return 200 'ok'; add_header Content-Type text/plain; }
+{{- if .Values.traceUi }}
+
+        # Runtime trace-UI config for the SPA: the image is built once and
+        # deployed everywhere, so the "Open trace" target can't be baked in.
+        # Must contain {traceId}; e.g. a Grafana Explore deep link.
+        location = /trace-ui.js {
+            default_type application/javascript;
+            return 200 'window.__TRACE_UI__={{ .Values.traceUi | quote }};';
+        }
+{{- end }}
 
         root /usr/share/nginx/html;
         index index.html;
