@@ -27,15 +27,16 @@
  * Billing::initialize()/install_for_testing()/reset_for_testing() mirror
  * Storage::/Email::'s module test-seam shape (see the bottom of
  * src/storage/Storage.hpp): initialize() validates billing.paypal.* config
- * (throwing if billing.enabled=true and client_id/client_secret are empty)
- * and installs the production singleton; install_for_testing() lets Task 4/5
- * controller tests inject a fake/mock subclass instead of touching the
- * network. PayPalClient::get() — a class static method, per this module's
- * documented interface — lazily calls initialize() on first use if nothing
- * installed a client yet, so production code needs no explicit Core.hpp
- * wiring to keep working; an earlier explicit Billing::initialize() call
- * (e.g. from Core.hpp, if a future task wires it there) simply makes
- * misconfiguration fail at boot instead of on the first request.
+ * (throwing if billing.enabled=true and client_id/client_secret/webhook_id
+ * are empty) and installs the production singleton; install_for_testing()
+ * lets Task 4/5 controller tests inject a fake/mock subclass instead of
+ * touching the network. PayPalClient::get() — a class static method, per
+ * this module's documented interface — lazily calls initialize() on first
+ * use if nothing installed a client yet, so production code needs no
+ * explicit Core.hpp wiring to keep working; an earlier explicit
+ * Billing::initialize() call (e.g. from Core.hpp, if a future task wires it
+ * there) simply makes misconfiguration fail at boot instead of on the first
+ * request.
  *
  * Every method that talks to PayPal (create_order, capture_order,
  * verify_webhook_signature's own call to PayPal) throws std::runtime_error
@@ -717,11 +718,13 @@ inline bool is_initialized() {
 
 /// Reads billing.paypal.* (and billing.enabled) from Config and installs the
 /// production singleton. Throws std::runtime_error if billing.enabled=true
-/// and client_id/client_secret are empty — fail loud rather than 500ing on
-/// the first real checkout attempt (mirrors S3Storage::initialize throwing
-/// when storage.backend=s3 is missing its endpoint/bucket, Storage.hpp
-/// around line 506). When billing is disabled (or Config was never
-/// initialized — a narrow unit test that never boots Core), an empty/default
+/// and client_id/client_secret/webhook_id are empty — fail loud rather than
+/// 500ing on the first real checkout attempt, or leaving an unset
+/// webhook_id to 5xx every webhook delivery forever (mirrors
+/// S3Storage::initialize throwing when storage.backend=s3 is missing its
+/// endpoint/bucket, Storage.hpp around line 506). When billing is disabled
+/// (or Config was never initialized — a narrow unit test that never boots
+/// Core), an empty/default
 /// config is installed without validation, matching how the rest of this
 /// module treats "billing off" as a no-op rather than an error.
 ///
@@ -735,9 +738,10 @@ inline void initialize() {
     PayPalClientConfig cfg = load_config_from_global();
     const bool billing_on =
         Config::is_initialized() && Config::get().get<bool>("billing.enabled", "BILLING_ENABLED", false);
-    if (billing_on && (cfg.client_id.empty() || cfg.client_secret.empty()))
+    if (billing_on && (cfg.client_id.empty() || cfg.client_secret.empty() || cfg.webhook_id.empty()))
         throw std::runtime_error(
-            "billing.paypal.client_id / billing.paypal.client_secret must be set when billing.enabled=true");
+            "billing.paypal.client_id / billing.paypal.client_secret / billing.paypal.webhook_id must be set "
+            "when billing.enabled=true");
     global_paypal_client = std::make_unique<PayPalClient>(std::move(cfg));
 }
 

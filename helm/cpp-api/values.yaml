@@ -378,6 +378,37 @@ storage:
     secretKey: ""         # via --set or external secret (sourced into S3_SECRET_KEY)
 
 # ---------------------------------------------------------------
+# Billing (credits + PayPal checkout) — disabled by default, same on/off
+# pattern as Jobs/Content above. Only paypal.clientSecret is a true secret
+# (never logged); clientId is public and webhookId is a webhook identifier,
+# not a credential, so both are rendered as plain config alongside the rest
+# of billing.paypal.* — matching how the app reads them (see
+# src/billing/PayPalClient.hpp).
+#
+# Enabling billing on a deployment whose API_PUBLIC_PATHS overrides the
+# built-in default also requires adding the webhook path
+# (/api/v1/billing/paypal/webhook) to that override — see docs/CONFIG.md.
+#
+# Env vars set: BILLING_ENABLED, PAYPAL_ENV, PAYPAL_CLIENT_ID,
+#               PAYPAL_WEBHOOK_ID, PAYPAL_RETURN_URL, PAYPAL_CANCEL_URL,
+#               PAYPAL_CLIENT_SECRET (from Secret, via secretKeyRef)
+# ---------------------------------------------------------------
+billing:
+  enabled: false
+  provider: paypal
+  currency: USD
+  creditsPerUnit: 100
+  minAmountCents: 100
+  maxAmountCents: 100000
+  paypal:
+    environment: sandbox   # sandbox | live
+    clientId: ""
+    clientSecret: ""       # Set via --set or external secret (sourced into PAYPAL_CLIENT_SECRET)
+    webhookId: ""
+    returnUrl: ""
+    cancelUrl: ""
+
+# ---------------------------------------------------------------
 # Graceful shutdown
 #   terminationGracePeriodSeconds — total time kubelet waits before SIGKILL.
 #                                   Must cover preStopDelay + in-flight work.

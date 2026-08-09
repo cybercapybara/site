@@ -193,6 +193,31 @@ readers get 401/404 on routes the code otherwise treats as public. See
 `config/config.production.json`, which currently overrides `API_PUBLIC_PATHS`
 without these and intentionally ships with content still gated off.
 
+## Billing (credits + PayPal checkout)
+
+| Env | JSON key | Type | Default | Notes |
+|---|---|---|---|---|
+| `BILLING_ENABLED` | `billing.enabled` | bool | `false` | Master switch for `BillingController` / `AdminBillingController` — same on/off pattern as `CONTENT_ENABLED`. `PayPalClient::initialize()` throws at boot if this is `true` and `client_id`/`client_secret`/`webhook_id` are empty. |
+| — | `billing.provider` | string | `paypal` | Only provider supported today |
+| `BILLING_CURRENCY` | `billing.currency` | string | `USD` | |
+| `BILLING_CREDITS_PER_UNIT` | `billing.credits_per_unit` | int | `100` | Credits minted per currency unit captured |
+| `BILLING_MIN_AMOUNT_CENTS` | `billing.min_amount_cents` | int | `100` | |
+| `BILLING_MAX_AMOUNT_CENTS` | `billing.max_amount_cents` | int | `100000` | |
+| `PAYPAL_ENV` | `billing.paypal.environment` | enum | `sandbox` | `sandbox` \| `live` |
+| `PAYPAL_CLIENT_ID` | `billing.paypal.client_id` | string | — | Public; not a credential |
+| `PAYPAL_CLIENT_SECRET` | `billing.paypal.client_secret` | string | — | Never logged; the only true secret in this block — sourced from the chart Secret, never a plaintext env |
+| `PAYPAL_WEBHOOK_ID` | `billing.paypal.webhook_id` | string | — | Identifies which PayPal webhook subscription to verify signatures against — an identifier, not a credential, but required when billing is enabled (an unset value 5xxs every webhook delivery forever) |
+| `PAYPAL_RETURN_URL` | `billing.paypal.return_url` | string | — | Where PayPal redirects on approved checkout |
+| `PAYPAL_CANCEL_URL` | `billing.paypal.cancel_url` | string | — | Where PayPal redirects on cancelled checkout |
+
+Enabling billing on a deployment whose `API_PUBLIC_PATHS` overrides the
+built-in default (rather than leaving it unset) must also add the webhook
+path — `/api/v1/billing/paypal/webhook` — to that override, since PayPal's
+own server calls it directly (not an authenticated user), or every webhook
+delivery gets 401'd instead of processed. See `config/config.production.json`,
+which currently overrides `API_PUBLIC_PATHS` without this path and
+intentionally ships with billing still gated off.
+
 ## Mail (SMTP)
 
 | Env | JSON key | Type | Default | Notes |

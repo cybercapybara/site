@@ -323,6 +323,33 @@ spec:
             - name: MAIL_SUBJECT_PREFIX
               value: {{ .Values.mail.subjectPrefix | quote }}
             {{- end }}
+            # Billing (credits + PayPal checkout) — api-side only. Only
+            # paypal.clientSecret is a true secret (never logged); client_id
+            # and webhook_id are public identifiers, not credentials, so
+            # they're rendered as plain env alongside the rest of the
+            # non-secret billing.paypal.* config, matching how the app reads
+            # them (see src/billing/PayPalClient.hpp).
+            - name: BILLING_ENABLED
+              value: {{ .Values.billing.enabled | quote }}
+            {{- if .Values.billing.enabled }}
+            - name: PAYPAL_ENV
+              value: {{ .Values.billing.paypal.environment | quote }}
+            - name: PAYPAL_CLIENT_ID
+              value: {{ .Values.billing.paypal.clientId | quote }}
+            - name: PAYPAL_WEBHOOK_ID
+              value: {{ .Values.billing.paypal.webhookId | quote }}
+            - name: PAYPAL_RETURN_URL
+              value: {{ .Values.billing.paypal.returnUrl | quote }}
+            - name: PAYPAL_CANCEL_URL
+              value: {{ .Values.billing.paypal.cancelUrl | quote }}
+            {{- if .Values.billing.paypal.clientSecret }}
+            - name: PAYPAL_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cpp-api.fullname" . }}
+                  key: paypal-client-secret
+            {{- end }}
+            {{- end }}
           securityContext:
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
