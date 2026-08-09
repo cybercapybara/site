@@ -6,6 +6,18 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.5.3] — 2026-08-09
+
+### Fixed
+- Admin Jobs "Open trace" no longer guesses the tracing UI host by swapping
+  the first DNS label for `jaeger` — on an apex domain that produced a link
+  to a stranger's site. The target is a runtime template containing
+  `{traceId}` (cpp-frontend chart's `traceUi`, served as `/trace-ui.js`), so
+  one image works everywhere and Grafana/Tempo deep links are supported.
+  Unset → no button; all-zero trace ids no longer render a dead link.
+- `secret-scan` runs the open-source gitleaks CLI instead of the action that
+  hard-fails without a paid license on organization-owned repositories.
+
 ## [1.5.2] — 2026-08-09
 
 ### Fixed
