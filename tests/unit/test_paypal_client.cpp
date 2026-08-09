@@ -326,11 +326,23 @@ TEST_F(PayPalClientInitializeTest, ThrowsWhenBillingEnabledWithoutCredentials) {
 
 TEST_F(PayPalClientInitializeTest, SucceedsWhenBillingEnabledWithCredentials) {
     const auto path = TestHelpers::create_temp_config(
-        R"({"billing": {"enabled": true, "paypal": {"client_id": "id", "client_secret": "secret"}}})",
+        R"({"billing": {"enabled": true, "paypal": {"client_id": "id", "client_secret": "secret", )"
+        R"("webhook_id": "wh-1"}}})",
         "paypal_client_test_has_creds.json");
     Config::initialize(path);
     EXPECT_NO_THROW(Billing::initialize());
     EXPECT_TRUE(Billing::is_initialized());
+    TestHelpers::remove_temp_config(path);
+}
+
+TEST_F(PayPalClientInitializeTest, ThrowsWhenBillingEnabledWithoutWebhookId) {
+    const auto path = TestHelpers::create_temp_config(
+        R"({"billing": {"enabled": true, "paypal": {"client_id": "id", "client_secret": "secret", )"
+        R"("webhook_id": ""}}})",
+        "paypal_client_test_missing_webhook_id.json");
+    Config::initialize(path);
+    EXPECT_THROW(Billing::initialize(), std::runtime_error);
+    EXPECT_FALSE(Billing::is_initialized());
     TestHelpers::remove_temp_config(path);
 }
 
