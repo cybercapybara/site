@@ -6,6 +6,22 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.5.1] — 2026-08-09
+
+Live-deploy fixes for the 1.5.0 content module.
+
+### Fixed
+- Frontend nginx now proxies the content module's public routes
+  (`/sitemap.xml`, `/posts/*`, `/uploads/*`) to the backend — they previously
+  fell through to the SPA catch-all and served `index.html`.
+- The cpp-api chart gained the missing uploads-storage wiring
+  (`values.storage` → config.json → Secret → `S3_ENDPOINT`/`S3_SECRET_KEY`);
+  a Helm deploy could previously only run the pod-local backend.
+- `client_max_body_size 6m` on the frontend `/api/` proxy — nginx's 1m
+  default 413'd photo uploads before they reached the backend.
+- The JSON content-type gate exempts `multipart/form-data` — it previously
+  415'd every upload before UploadController's own validation ran.
+
 ## [1.5.0] — 2026-08-08
 
 Content module — an optional posts/blog subsystem backported from a
