@@ -39,7 +39,23 @@
  *     trusted JSON. No authenticated principal is required or possible.
  *   - Response codes are NOT the usual REST mapping — PayPal retries any
  *     non-2xx for days, so "handled" and "deliberately ignored" both answer
- *     200. See webhook()'s own doc comment for the exact 200/401/5xx rules.
+ *     200. See paypalWebhook()'s own doc comment for the exact 200/401/5xx
+ *     rules. Everything past signature verification runs inside its own
+ *     dedicated try/catch — deliberately NOT with_repo_errors (which every
+ *     other handler in this file uses): with_repo_errors maps
+ *     NotFoundError/ConflictError/ValidationError to 404/409/400
+ *     respectively, but a webhook has no REST-shaped caller to hand a 4xx
+ *     to — every failure here (except the one narrow case documented on
+ *     handleCaptureRefunded) must become a uniform 5xx so PayPal retries.
+ *     This also closes a real crash: a malformed-but-validly-signed body
+ *     (e.g. "id" arriving as a JSON number) used to throw straight out of
+ *     this handler uncaught — Drogon does not catch that, so it took the
+ *     whole process down.
+ *   - PAYMENT.CAPTURE.REVERSED (PayPal claws back a capture — chargeback/
+ *     dispute/risk) is handled IDENTICALLY to PAYMENT.CAPTURE.REFUNDED
+ *     (merchant-initiated): both are debit-shaped events per PayPal's own
+ *     REST webhooks event-names reference, both DEBIT the wallet. See
+ *     handleCaptureRefunded's doc comment.
  */
 
 #pragma once
@@ -49,6 +65,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include <drogon/HttpController.h>
 
@@ -276,18 +293,29 @@ public:
     //   - 401: verify_webhook_signature() returned false (malformed body,
     //     missing paypal-* headers, or PayPal itself said the signature
     //     doesn't check out). Nothing is credited/refunded past this point.
-    //   - 5xx (via with_repo_errors' std::exception catch -> 500): PayPal's
-    //     OWN verify-webhook-signature API was unreachable or answered
-    //     non-2xx (verify_webhook_signature() THROWS for this — see
-    //     PayPalClient.hpp's class doc comment). This is a real "ask me
-    //     again later", unlike every other branch below.
-    //   - 200: everything else — a credit/refund actually applied, an
-    //     already-processed event replayed as a no-op, an event type this
-    //     handler deliberately doesn't act on, or (KNOWN GAP, see
-    //     handleCaptureReversed's doc comment) a reversal event it can't yet
-    //     structurally represent. PayPal retries any non-2xx for days, so
-    //     every one of these must answer 200 or PayPal will hammer this
-    //     endpoint forever for a condition retrying can never fix.
+    //   - 5xx: EITHER PayPal's OWN verify-webhook-signature API was
+    //     unreachable/non-2xx (verify_webhook_signature() THROWS for this —
+    //     see PayPalClient.hpp's class doc comment) OR processing a
+    //     signature-VALID body failed for any reason at all — malformed
+    //     shape (e.g. "id" arriving as a number, not a string), an
+    //     unresolvable refund/reversal capture id, or Billing::refund_capture
+    //     itself throwing (notably Repositories::PaymentNotFound, which can
+    //     legitimately happen if this event races ahead of the
+    //     CAPTURE.COMPLETED webhook that would have set
+    //     provider_capture_id). ALL of that is caught by the ONE try/catch
+    //     below — nothing after signature verification is allowed to escape
+    //     this handler uncaught (Drogon does not catch it; an uncaught
+    //     exception here crashes the process). 5xx tells PayPal to retry,
+    //     which is the safe default: malformed-but-validly-signed is
+    //     vanishingly rare, and silently dropping a DEBIT event (refund/
+    //     reversal) into a 200 would be real, unrecoverable money loss.
+    //   - 200: a credit successfully applied (or safely no-op'd) by
+    //     handleCaptureCompleted, an already-processed refund/reversal
+    //     replayed as a no-op by handleCaptureRefunded, or an event type
+    //     this handler deliberately doesn't act on. PayPal retries any
+    //     non-2xx for days, so every one of these must answer 200 or PayPal
+    //     will hammer this endpoint forever for a condition retrying can
+    //     never fix.
     void paypalWebhook(const HttpRequestPtr& req, std::function<void(const HttpResponsePtr&)>&& callback) {
         if (!Core::billing_enabled()) {
             callback(ErrorResponse::not_found("billing"));
@@ -318,37 +346,52 @@ public:
             return;
         }
 
-        // Verified true implies raw_body was valid JSON (verify_webhook_signature
-        // parses it itself and returns false otherwise) — this re-parse is
-        // defensive only, never expected to fail in practice.
-        json event;
+        // Everything past this point parses/dispatches a signature-VALID but
+        // still schema-UNTRUSTED body — PayPal signing a request proves only
+        // that PayPal sent it, not that its shape matches what this handler
+        // expects. The whole thing — including the two json::value() reads
+        // right below, which is where a fix-round review caught a real crash
+        // (a signature-valid "id": 12345 throws nlohmann::json::type_error
+        // out of a handler that was, at the time, not wrapped in anything) —
+        // runs inside ONE try/catch. See this method's own doc comment above
+        // for the full 200/401/5xx breakdown.
         try {
-            event = json::parse(raw_body);
-        } catch (const json::parse_error& e) {
-            spdlog::error("billing webhook: signature-verified body failed to re-parse (unreachable in practice): {}",
-                          e.what());
-            callback(Response::ok({{"data", {{"handled", false}}}}));
-            return;
-        }
+            json event = json::parse(raw_body);  // defensive re-parse; verify_webhook_signature() already required valid JSON to return true.
 
-        const std::string event_id = event.value("id", std::string());
-        const std::string event_type = event.value("event_type", std::string());
-        // Every received (signature-valid) event id, at info level — the
-        // dedupe/debug trail the brief asks for, independent of whether this
-        // handler acts on the event.
-        spdlog::info("billing webhook: received event id={} type={}", event_id, event_type);
+            const std::string event_id = event.value("id", std::string());
+            const std::string event_type = event.value("event_type", std::string());
+            // Every received (signature-valid) event id, at info level — the
+            // dedupe/debug trail the brief asks for, independent of whether
+            // this handler acts on the event.
+            spdlog::info("billing webhook: received event id={} type={}", event_id, event_type);
 
-        auto respond_handled = [callback](bool handled) { callback(Response::ok({{"data", {{"handled", handled}}}})); };
+            auto respond_handled = [callback](bool handled) {
+                callback(Response::ok({{"data", {{"handled", handled}}}}));
+            };
 
-        if (event_type == "PAYMENT.CAPTURE.COMPLETED") {
-            handleCaptureCompleted(event, event_id, respond_handled);
-        } else if (event_type == "PAYMENT.CAPTURE.REFUNDED") {
-            handleCaptureRefunded(event, event_id, respond_handled);
-        } else if (event_type == "PAYMENT.CAPTURE.REVERSED") {
-            handleCaptureReversed(event, event_id, respond_handled);
-        } else {
-            spdlog::info("billing webhook: ignoring unrelated event type '{}' (event {})", event_type, event_id);
-            respond_handled(false);
+            if (event_type == "PAYMENT.CAPTURE.COMPLETED") {
+                handleCaptureCompleted(event, event_id, respond_handled);
+            } else if (event_type == "PAYMENT.CAPTURE.REFUNDED") {
+                handleCaptureRefunded(event, event_id, "refund", respond_handled);
+            } else if (event_type == "PAYMENT.CAPTURE.REVERSED") {
+                // PayPal reverses a payment capture (chargeback/dispute/risk
+                // hold) — see handleCaptureRefunded's doc comment for why
+                // this is routed into the exact same handler as a
+                // merchant-initiated refund rather than a distinct path.
+                handleCaptureRefunded(event, event_id, "reversal", respond_handled);
+            } else {
+                spdlog::info("billing webhook: ignoring unrelated event type '{}' (event {})", event_type, event_id);
+                respond_handled(false);
+            }
+        } catch (const std::exception& e) {
+            // Covers: malformed top-level shape (event_id/event_type reads
+            // above), and anything handleCaptureRefunded lets propagate
+            // (see its doc comment — a refund/reversal that "can't be
+            // applied" is deliberately NOT swallowed into a 200 here).
+            // handleCaptureCompleted, by contrast, still catches its own
+            // failures locally and acks 200 — unaffected by this catch.
+            spdlog::error("billing webhook: failed to process signature-verified event body: {}", e.what());
+            callback(ErrorResponse::internal_error());
         }
     }
 
@@ -373,20 +416,36 @@ private:
     }
 
     // PayPal's "up" link on a v2 refund resource points at
-    // .../v2/payments/captures/{capture_id} — the refund resource itself
-    // carries no direct capture_id field. Returns "" if no "up" link is
-    // present (malformed/unexpected payload).
+    // .../v2/payments/captures/{capture_id}[?query][#fragment] — the refund
+    // resource itself carries no direct capture_id field. Anchored on the
+    // literal "/captures/" marker (NOT "everything after the last '/'" — a
+    // fix-round review caught that a trailing '/', a '?query', or a
+    // '#fragment' after the id all silently produced "" with the old
+    // last-slash approach, permanently dropping a real refund/reversal:
+    // capture_id="" → refund_capture() never called → 200 handled=false →
+    // PayPal never redelivers). Strips any query string, fragment, and
+    // trailing slash from the extracted segment. Returns "" only when no
+    // "up" link with a "/captures/" href is present at all (a genuinely
+    // malformed/unexpected payload).
     static std::string extract_capture_id_from_links(const json& resource) {
         if (!resource.contains("links") || !resource["links"].is_array())
             return {};
+        static constexpr std::string_view kMarker = "/captures/";
         for (const auto& link : resource["links"]) {
             if (!link.is_object() || link.value("rel", std::string()) != "up")
                 continue;
             const std::string href = link.value("href", std::string());
-            const auto pos = href.find_last_of('/');
-            if (pos == std::string::npos || pos + 1 >= href.size())
+            const auto marker_pos = href.rfind(kMarker);
+            if (marker_pos == std::string::npos)
                 continue;
-            return href.substr(pos + 1);
+            std::string id = href.substr(marker_pos + kMarker.size());
+            const auto cut = id.find_first_of("?#");
+            if (cut != std::string::npos)
+                id = id.substr(0, cut);
+            while (!id.empty() && id.back() == '/')
+                id.pop_back();
+            if (!id.empty())
+                return id;
         }
         return {};
     }
@@ -442,101 +501,102 @@ private:
         respond(true);
     }
 
-    // PAYMENT.CAPTURE.REFUNDED → refund, keyed on PayPal's OWN refund id
-    // (resource.id) as the idempotency key into Billing::refund_capture —
-    // per Task 2's report, the durable `billing_refunds` row on that id is
-    // what makes a redelivered refund event a true no-op.
+    // PAYMENT.CAPTURE.REFUNDED (merchant-initiated refund) and
+    // PAYMENT.CAPTURE.REVERSED (PayPal claws back a capture — chargeback/
+    // dispute/risk hold) share this ONE handler. Confirmed against PayPal's
+    // REST webhooks event-names reference
+    // (developer.paypal.com/api/rest/webhooks/event-names), not from memory:
+    // REFUNDED = "A merchant refunds a payment capture"; REVERSED = "PayPal
+    // reverses a payment capture". Both are DEBIT-shaped events — money
+    // leaves the merchant either way — and both carry the identical
+    // refund-shaped resource (id, amount, links[rel=up]->capture), so both
+    // drive Billing::refund_capture identically. A REFUNDED and a later
+    // REVERSED touching the same underlying capture carry DISTINCT ids
+    // (this event's own resource.id becomes provider_refund_id) —
+    // refund_capture's own idempotency (its `billing_refunds` row) plus its
+    // cumulative-amount-vs-payments.amount_cents cap already prevent the two
+    // from ever double-debiting past the original payment amount, with no
+    // extra bookkeeping needed here.
+    //
+    // (Separately: Task 2's original "a refund itself is later voided"
+    // concern maps to NO PayPal v2 webhook event at all — there is no
+    // PAYMENT.REFUND.REVERSED in PayPal's event-names reference. That is a
+    // structural gap no webhook handler can close by listening for more
+    // events; it stays an accepted, documented limitation of
+    // Billing::refund_capture's `billing_refunds` cumulative check, not
+    // something this handler failed to cover.)
+    //
+    // NOTHING here is caught locally — unlike handleCaptureCompleted, a
+    // malformed resource, an unresolvable capture id, or refund_capture
+    // itself throwing (notably Repositories::PaymentNotFound, which can
+    // legitimately happen if this event is delivered before the
+    // CAPTURE.COMPLETED webhook that would have set provider_capture_id) all
+    // propagate to paypalWebhook's outer try/catch, which answers 5xx so
+    // PayPal redelivers. A DEBIT event must never be silently 200-acked away
+    // — that is real money gone with no way to recover it once PayPal stops
+    // retrying (a fix-round review's Critical finding: this handler used to
+    // treat REVERSED as a no-op, which is exactly this failure mode).
     static void handleCaptureRefunded(const json& event,
                                       const std::string& event_id,
+                                      const char* kind_label,  // "refund" or "reversal" — logging only
                                       std::function<void(bool)> respond) {
         const json resource = event.value("resource", json::object());
-        std::string refund_id, currency, capture_id;
-        std::int64_t amount_cents = 0;
-        try {
-            refund_id = resource.at("id").get<std::string>();
-            currency = resource.at("amount").at("currency_code").get<std::string>();
-            amount_cents =
-                Billing::detail::parse_decimal_to_cents(resource.at("amount").at("value").get<std::string>());
-            capture_id = extract_capture_id_from_links(resource);
-        } catch (const std::exception& e) {
-            spdlog::error(
-                "billing webhook: malformed PAYMENT.CAPTURE.REFUNDED resource (event {}): {}", event_id, e.what());
-            respond(false);
-            return;
-        }
+        const std::string refund_id = resource.at("id").get<std::string>();
+        // currency_code is extracted for logging/traceability only —
+        // refund_capture() takes no currency parameter: it always debits
+        // against the ORIGINAL payment's own currency (fixed at
+        // credit_capture time), and PayPal never refunds/reverses a capture
+        // in a different currency than it was captured in.
+        const std::string currency = resource.at("amount").at("currency_code").get<std::string>();
+        const std::int64_t amount_cents =
+            Billing::detail::parse_decimal_to_cents(resource.at("amount").at("value").get<std::string>());
+        const std::string capture_id = extract_capture_id_from_links(resource);
         if (capture_id.empty()) {
             spdlog::error(
-                "billing webhook: PAYMENT.CAPTURE.REFUNDED refund {} (event {}) has no 'up' link — cannot resolve "
-                "its capture id, refund not applied",
+                "billing webhook: PAYMENT.CAPTURE {} {} (event {}) has no resolvable capture id from its 'up' "
+                "link — will retry (5xx) rather than drop it",
+                kind_label,
                 refund_id,
                 event_id);
-            respond(false);
-            return;
+            throw std::runtime_error("billing webhook: unresolvable capture id for " + std::string(kind_label) +
+                                     " " + refund_id);
         }
 
         try {
             auto result = Billing::refund_capture(capture_id, refund_id, amount_cents);
-            spdlog::info("billing webhook: refund {} capture {} (event {}) — newly recorded={} balance={}",
+            spdlog::info("billing webhook: {} {} capture {} currency {} (event {}) — newly recorded={} balance={}",
+                         kind_label,
                          refund_id,
                          capture_id,
+                         currency,
                          event_id,
                          result.credited,
                          result.balance);
-        } catch (const std::exception& e) {
-            // Unknown capture, or an amount PayPal itself reports that fails
-            // our own sanity bounds (InvalidRefundAmount) — see the note on
-            // handleCaptureCompleted's catch: logged loudly, still 200,
-            // retrying changes nothing.
-            spdlog::error("billing webhook: refund_capture failed for capture {} refund {} (event {}): {}",
-                          capture_id,
+        } catch (const Repositories::ValidationError& e) {
+            // InvalidRefundAmount: PayPal's own reported amount is out of
+            // range, or pushes the cumulative refunded+reversed total for
+            // this capture past payments.amount_cents (refund_capture's own
+            // step-3 guard — see Wallet.hpp). THIS is what keeps a REFUNDED
+            // followed by a REVERSED on the same capture (distinct ids) from
+            // ever double-debiting past the original payment amount: the
+            // second one lands here and writes nothing at all, not even a
+            // billing_refunds row. Unlike an unresolvable capture id or an
+            // unknown order, this is a structural mismatch a retry can never
+            // resolve, so — deliberately unlike everything else this
+            // function can fail on — it's caught HERE and acked 200 rather
+            // than left to propagate into paypalWebhook's 5xx catch.
+            spdlog::error("billing webhook: {} {} capture {} (event {}) refused by refund_capture: {}",
+                          kind_label,
                           refund_id,
+                          capture_id,
                           event_id,
                           e.what());
         }
+        // Anything else refund_capture throws (notably
+        // Repositories::PaymentNotFound) is NOT caught here — it propagates
+        // to paypalWebhook's outer try/catch, which answers 5xx. See this
+        // function's own doc comment for why.
         respond(true);
-    }
-
-    // KNOWN GAP (flagged in Task 2's report, decided here): PayPal can later
-    // reverse a refund (PAYMENT.CAPTURE.REVERSED, or void a refund outright)
-    // and this schema has no representation for it — migrations/
-    // 008_billing_refunds.sql's `billing_refunds` table records refunds
-    // applied, never a later reversal of one. If reversal were silently
-    // ignored, the stale billing_refunds row from the original refund stays
-    // in refund_capture's step-3 cumulative-total check forever, which could
-    // wrongly refuse a later LEGITIMATE refund on the same payment as
-    // "cumulative total exceeds amount_cents" even though the reversed
-    // refund never actually took money out a second time.
-    //
-    // Deferring an actual fix to a follow-up task is deliberate, not an
-    // oversight: representing a reversal correctly needs a real schema/
-    // Wallet.hpp change (at minimum, a way to mark a billing_refunds row
-    // voided and re-credit the wallet for it) — a money-semantics change on
-    // par with Task 2's own work, out of scope for Task 5's Files list
-    // (BillingController.hpp / Endpoints.hpp / openapi.yaml / Strings.hpp /
-    // config.json only, no migration). PayPal reversing a refund it itself
-    // just paid out is also an operationally rare event (typically a bank
-    // dispute on the refund transfer itself), not a routine flow.
-    //
-    // What this DOES do, so the gap is loud instead of silent: log at ERROR
-    // (not info, unlike a genuinely-ignored event type) with the event id
-    // and, if resolvable, the capture id — so it shows up in on-call/alert
-    // pipelines and the next task to touch billing has a concrete trail to
-    // follow instead of rediscovering this from scratch. Still acks 200:
-    // there is nothing this handler CAN do about it today, and refusing the
-    // ack would just make PayPal retry an event we're already unable to act
-    // on for days.
-    static void handleCaptureReversed(const json& event,
-                                      const std::string& event_id,
-                                      std::function<void(bool)> respond) {
-        const json resource = event.value("resource", json::object());
-        const std::string capture_id = extract_capture_id_from_links(resource);
-        spdlog::error(
-            "billing webhook: KNOWN GAP — received PAYMENT.CAPTURE.REVERSED (event {}, capture {}) with no schema "
-            "representation for a refund reversal; the original refund's billing_refunds row is NOT adjusted. "
-            "Manual reconciliation required — see BillingController::handleCaptureReversed's doc comment",
-            event_id,
-            capture_id.empty() ? "<unresolved>" : capture_id);
-        respond(false);
     }
 
     // Strips `created_by` (an admin's raw UUID on adjustment rows) before a

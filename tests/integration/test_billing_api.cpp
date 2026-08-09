@@ -263,16 +263,31 @@ protected:
                                        const std::string& capture_id,
                                        const std::string& amount_value,
                                        const std::string& currency = "USD") {
-        return json{
-            {"id", event_id},
-            {"event_type", "PAYMENT.CAPTURE.REFUNDED"},
-            {"resource",
-             {{"id", refund_id},
-              {"status", "COMPLETED"},
-              {"amount", {{"value", amount_value}, {"currency_code", currency}}},
-              {"links",
-               json::array({{{"rel", "up"},
-                             {"href", "https://api.sandbox.paypal.com/v2/payments/captures/" + capture_id}}})}}}};
+        return capture_refunded_event_with_href(
+            event_id,
+            refund_id,
+            "https://api.sandbox.paypal.com/v2/payments/captures/" + capture_id,
+            amount_value,
+            currency);
+    }
+
+    // Same shape, but with a caller-supplied "up" link href — lets tests
+    // exercise extract_capture_id_from_links' query-string/fragment/
+    // trailing-slash handling directly, and PAYMENT.CAPTURE.REVERSED (which
+    // shares this exact resource shape per PayPal's event-names reference).
+    static json capture_refunded_event_with_href(const std::string& event_id,
+                                                 const std::string& refund_id,
+                                                 const std::string& up_href,
+                                                 const std::string& amount_value,
+                                                 const std::string& currency = "USD",
+                                                 const std::string& event_type = "PAYMENT.CAPTURE.REFUNDED") {
+        return json{{"id", event_id},
+                    {"event_type", event_type},
+                    {"resource",
+                     {{"id", refund_id},
+                      {"status", "COMPLETED"},
+                      {"amount", {{"value", amount_value}, {"currency_code", currency}}},
+                      {"links", json::array({{{"rel", "up"}, {"href", up_href}}})}}}};
     }
 };
 
@@ -668,12 +683,18 @@ TEST_F(BillingApiTest, WebhookCreditsWhenUserNeverReturned) {
     // fake->capture_order is never invoked in this test — the return-flow
     // capture endpoint is never called at all.
 
+    auto event =
+        capture_completed_event("WH-NEVERRETURNED-1", "ORDER-NEVERRETURNED-1", "CAPTURE-NEVERRETURNED-1", "10.00");
     int status = 0;
-    auto body = do_webhook(
-        capture_completed_event("WH-NEVERRETURNED-1", "ORDER-NEVERRETURNED-1", "CAPTURE-NEVERRETURNED-1", "10.00"),
-        &status);
+    auto body = do_webhook(event, &status);
     EXPECT_EQ(status, k200OK);
     EXPECT_TRUE(body["data"]["handled"].get<bool>());
+
+    // The signature is verified against the RAW body exactly as received —
+    // not a re-serialized/re-derived version of it (see PayPalClient::
+    // verify_webhook_signature's doc comment and paypalWebhook's own).
+    EXPECT_EQ(fake->verify_webhook_signature_calls, 1);
+    EXPECT_EQ(fake->last_verify_raw_body, event.dump());
 
     EXPECT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 1000);
     EXPECT_EQ(Billing::history(user.subject, 10, 0, /*from_primary=*/true).size(), 1u);
@@ -827,38 +848,183 @@ TEST_F(BillingApiTest, WebhookIgnoresUnrelatedEventTypes) {
     EXPECT_FALSE(payment->provider_capture_id.has_value());
 }
 
-// KNOWN GAP (see BillingController::handleCaptureReversed): a reversal event
-// still acks 200 (nothing to retry into existing) but must NOT touch the
-// wallet or the original refund's billing_refunds row — there's no code
-// path here that could even if it tried, this just pins that down.
-TEST_F(BillingApiTest, WebhookReversalEventIsAcknowledgedButNotApplied) {
+// CRITICAL fix (fix round 1): PAYMENT.CAPTURE.REVERSED is PayPal clawing
+// back a capture (chargeback/dispute/risk hold) — money leaves the merchant
+// exactly like a refund, confirmed against PayPal's REST webhooks
+// event-names reference (not from memory — see
+// BillingController::handleCaptureRefunded's doc comment). It must DEBIT
+// the wallet, not no-op. This replaces the old (wrong)
+// WebhookReversalEventIsAcknowledgedButNotApplied test, which asserted the
+// opposite.
+TEST_F(BillingApiTest, WebhookReversalDebitsWalletLikeARefund) {
     auto user = seed_user("webhook-reversed@example.com");
     fake->next_order_id = "ORDER-REVERSED-1";
     do_topup(user, json{{"amount_cents", 1000}});
     fake->capture_amount_cents = 1000;
     fake->capture_currency = "USD";
     do_capture(user, "ORDER-REVERSED-1");
-    do_webhook(capture_refunded_event("WH-REVERSED-REFUND-1", "REFUND-REVERSED-1", fake->next_capture_id, "10.00"));
-    ASSERT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 0);
-    auto balance_before = Billing::balance_of(user.subject, /*from_primary=*/true);
-    auto hist_before = Billing::history(user.subject, 10, 0, /*from_primary=*/true).size();
+    ASSERT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 1000);
 
-    json reversal = {
-        {"id", "WH-REVERSED-1"},
-        {"event_type", "PAYMENT.CAPTURE.REVERSED"},
-        {"resource",
-         {{"id", "REFUND-REVERSED-1"},
-          {"links",
-           json::array(
-               {{{"rel", "up"},
-                 {"href", "https://api.sandbox.paypal.com/v2/payments/captures/" + fake->next_capture_id}}})}}}};
     int status = 0;
-    auto body = do_webhook(reversal, &status);
+    auto body = do_webhook(capture_refunded_event_with_href(
+                               "WH-REVERSED-1",
+                               "REVERSAL-1",
+                               "https://api.sandbox.paypal.com/v2/payments/captures/" + fake->next_capture_id,
+                               "10.00",
+                               "USD",
+                               "PAYMENT.CAPTURE.REVERSED"),
+                           &status);
     EXPECT_EQ(status, k200OK);
-    EXPECT_FALSE(body["data"]["handled"].get<bool>());
+    EXPECT_TRUE(body["data"]["handled"].get<bool>());
 
-    EXPECT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), balance_before);
-    EXPECT_EQ(Billing::history(user.subject, 10, 0, /*from_primary=*/true).size(), hist_before);
+    EXPECT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 0);
+    auto hist = Billing::history(user.subject, 10, 0, /*from_primary=*/true);
+    ASSERT_EQ(hist.size(), 2u);  // topup + reversal debit
+    const auto& reversal_entry = hist[0];
+    // Domain::WalletEntryKind has no separate "reversal" kind — REVERSED
+    // drives the exact same Billing::refund_capture() as REFUNDED, so it
+    // lands as an ordinary "refund" ledger entry.
+    EXPECT_EQ(reversal_entry.kind, "refund");
+    EXPECT_EQ(reversal_entry.delta_credits, -1000);
+    EXPECT_EQ(reversal_entry.reference, "REVERSAL-1");
+
+    auto payment = payments.find_by_order_id("ORDER-REVERSED-1", /*from_primary=*/true);
+    ASSERT_TRUE(payment.has_value());
+    EXPECT_EQ(payment->status, "refunded");  // payments.status has no distinct "reversed" state either
+}
+
+// A merchant REFUNDED, then PayPal REVERSES the same capture (distinct
+// ids) — the combined debit must never exceed the original payment amount.
+// refund_capture()'s own cumulative-total guard (InvalidRefundAmount) is
+// what enforces this; the second event writes nothing at all, not even a
+// billing_refunds row, and is acked 200 rather than retried (a retry could
+// never make an over-the-cap amount valid).
+TEST_F(BillingApiTest, WebhookRefundThenReversalDoesNotDoubleDebitPastAmountCents) {
+    auto user = seed_user("webhook-refund-then-reversed@example.com");
+    fake->next_order_id = "ORDER-REFUND-REVERSED-1";
+    do_topup(user, json{{"amount_cents", 1000}});
+    fake->capture_amount_cents = 1000;
+    fake->capture_currency = "USD";
+    do_capture(user, "ORDER-REFUND-REVERSED-1");
+    ASSERT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 1000);
+
+    // Partial merchant refund: 600 of 1000 cents -> 600 of 1000 credits.
+    int refund_status = 0;
+    auto refund_body = do_webhook(
+        capture_refunded_event("WH-PARTIAL-REFUND-1", "REFUND-PARTIAL-1", fake->next_capture_id, "6.00"),
+        &refund_status);
+    ASSERT_EQ(refund_status, k200OK);
+    ASSERT_TRUE(refund_body["data"]["handled"].get<bool>());
+    ASSERT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 400);  // 1000 - 600
+
+    // PayPal reverses the SAME capture for another 600 cents, DISTINCT id —
+    // cumulative (600 + 600 = 1200) exceeds amount_cents (1000).
+    int reversal_status = 0;
+    auto reversal_body = do_webhook(capture_refunded_event_with_href(
+                                        "WH-REVERSAL-AFTER-REFUND-1",
+                                        "REVERSAL-AFTER-REFUND-1",  // distinct from REFUND-PARTIAL-1
+                                        "https://api.sandbox.paypal.com/v2/payments/captures/" +
+                                            fake->next_capture_id,
+                                        "6.00",
+                                        "USD",
+                                        "PAYMENT.CAPTURE.REVERSED"),
+                                    &reversal_status);
+    EXPECT_EQ(reversal_status, k200OK);
+    EXPECT_TRUE(reversal_body["data"]["handled"].get<bool>());
+
+    // Balance is UNCHANGED from after the first refund — not debited twice.
+    EXPECT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 400);
+    EXPECT_EQ(Billing::history(user.subject, 10, 0, /*from_primary=*/true).size(), 2u);  // topup + first refund only
+}
+
+// IMPORTANT-1 fix (fix round 1): a signature-VALID but schema-malformed body
+// used to crash the whole process (nlohmann::json::type_error escaping the
+// controller method uncaught, since this handler wasn't wrapped in
+// with_repo_errors like every other one). "id" arriving as a JSON number
+// instead of a string is exactly the reported repro.
+TEST_F(BillingApiTest, WebhookMalformedButSignedBodyReturns5xxNotCrash) {
+    auto user = seed_user("webhook-malformed@example.com");
+    fake->next_order_id = "ORDER-MALFORMED-1";
+    do_topup(user, json{{"amount_cents", 1000}});
+
+    json event = {{"id", 12345}, {"event_type", "PAYMENT.CAPTURE.COMPLETED"}, {"resource", json::object()}};
+    int status = 0;
+    auto body = do_webhook(event, &status);
+    EXPECT_GE(status, 500);
+    EXPECT_LT(status, 600);
+    EXPECT_EQ(body["error"], "internal_error");
+
+    EXPECT_EQ(Billing::balance_of(user.subject), 0);
+    EXPECT_EQ(Billing::history(user.subject, 10, 0).size(), 0u);
+}
+
+// IMPORTANT-2 fix (fix round 1): extract_capture_id_from_links used to take
+// "everything after the last '/'", so a query string after the capture id
+// silently produced "" (dropping the refund forever). Anchoring on the
+// "/captures/" marker and stripping ?query/#fragment/trailing '/' fixes it.
+TEST_F(BillingApiTest, WebhookRefundResolvesCaptureIdWithQueryStringOnUpLink) {
+    auto user = seed_user("webhook-refund-query@example.com");
+    fake->next_order_id = "ORDER-REFUND-QUERY-1";
+    do_topup(user, json{{"amount_cents", 1000}});
+    fake->capture_amount_cents = 1000;
+    fake->capture_currency = "USD";
+    do_capture(user, "ORDER-REFUND-QUERY-1");
+    ASSERT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 1000);
+
+    const std::string href =
+        "https://api.sandbox.paypal.com/v2/payments/captures/" + fake->next_capture_id + "?embed=disputes";
+    int status = 0;
+    auto body =
+        do_webhook(capture_refunded_event_with_href("WH-REFUND-QUERY-1", "REFUND-QUERY-1", href, "10.00"), &status);
+    EXPECT_EQ(status, k200OK);
+    EXPECT_TRUE(body["data"]["handled"].get<bool>());
+    EXPECT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 0);
+}
+
+TEST_F(BillingApiTest, WebhookRefundResolvesCaptureIdWithTrailingSlashOnUpLink) {
+    auto user = seed_user("webhook-refund-trailing@example.com");
+    fake->next_order_id = "ORDER-REFUND-TRAILING-1";
+    do_topup(user, json{{"amount_cents", 1000}});
+    fake->capture_amount_cents = 1000;
+    fake->capture_currency = "USD";
+    do_capture(user, "ORDER-REFUND-TRAILING-1");
+    ASSERT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 1000);
+
+    const std::string href = "https://api.sandbox.paypal.com/v2/payments/captures/" + fake->next_capture_id + "/";
+    int status = 0;
+    auto body = do_webhook(capture_refunded_event_with_href("WH-REFUND-TRAILING-1", "REFUND-TRAILING-1", href, "10.00"),
+                           &status);
+    EXPECT_EQ(status, k200OK);
+    EXPECT_TRUE(body["data"]["handled"].get<bool>());
+    EXPECT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 0);
+}
+
+// IMPORTANT-2's other half: when a refund/reversal genuinely CANNOT be
+// resolved (no "up" link at all), it must NOT be 200-acked into oblivion —
+// that permanently drops a real debit event, since PayPal never redelivers
+// a 2xx. It must 5xx so PayPal retries, and the wallet stays untouched.
+TEST_F(BillingApiTest, WebhookRefundWithUnresolvableCaptureIdReturns5xx) {
+    auto user = seed_user("webhook-refund-nolink@example.com");
+    fake->next_order_id = "ORDER-REFUND-NOLINK-1";
+    do_topup(user, json{{"amount_cents", 1000}});
+    fake->capture_amount_cents = 1000;
+    fake->capture_currency = "USD";
+    do_capture(user, "ORDER-REFUND-NOLINK-1");
+    ASSERT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 1000);
+
+    json event = {{"id", "WH-REFUND-NOLINK-1"},
+                 {"event_type", "PAYMENT.CAPTURE.REFUNDED"},
+                 {"resource",
+                  {{"id", "REFUND-NOLINK-1"},
+                   {"amount", {{"value", "10.00"}, {"currency_code", "USD"}}},
+                   {"links", json::array()}}}};
+    int status = 0;
+    auto body = do_webhook(event, &status);
+    EXPECT_GE(status, 500);
+    EXPECT_LT(status, 600);
+
+    EXPECT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 1000);           // untouched
+    EXPECT_EQ(Billing::history(user.subject, 10, 0, /*from_primary=*/true).size(), 1u);  // still just the topup credit
 }
 
 // ── wallet ───────────────────────────────────────────────────────────────

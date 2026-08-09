@@ -352,11 +352,11 @@ components:
               description: Present (true) only when PayPal's capture has not reached COMPLETED yet — the payment is left uncaptured for the webhook to resolve.
 
     # POST /api/v1/billing/paypal/webhook. `handled` distinguishes "this event
-    # type applies real ledger logic" (PAYMENT.CAPTURE.COMPLETED/REFUNDED)
-    # from "acknowledged but deliberately not acted on" (an unrelated event
-    # type, or PAYMENT.CAPTURE.REVERSED — see BillingController::
-    # handleCaptureReversed's KNOWN GAP doc comment) — both answer 200 either
-    # way, since PayPal retries any non-2xx for days.
+    # type applies real ledger logic" (PAYMENT.CAPTURE.COMPLETED/REFUNDED/
+    # REVERSED — see BillingController::handleCaptureRefunded's doc comment
+    # for why REVERSED shares REFUNDED's handling) from "acknowledged but
+    # deliberately not acted on" (an unrelated event type) — both answer 200
+    # either way, since PayPal retries any non-2xx for days.
     WebhookAckResponse:
       type: object
       required: [data]
@@ -1352,13 +1352,19 @@ paths:
           * PAYMENT.CAPTURE.COMPLETED credits the wallet (idempotent — a
             capture already credited via POST .../capture, including one
             that resolves a PENDING return-flow capture, is a 200 no-op).
-          * PAYMENT.CAPTURE.REFUNDED refunds via the same logic as
-            Billing::refund_capture, keyed on PayPal's own refund id as the
-            idempotency marker.
-          * Any other event type (including PAYMENT.CAPTURE.REVERSED — a
-            known gap, see BillingController::handleCaptureReversed) is
-            acknowledged with 200 and NOT acted on.
-        200 is returned for every signature-valid event, handled or not.
+          * PAYMENT.CAPTURE.REFUNDED (merchant refund) and
+            PAYMENT.CAPTURE.REVERSED (PayPal claws back a capture —
+            chargeback/dispute/risk) both DEBIT the wallet via the same
+            Billing::refund_capture logic, keyed on the event's own id as
+            the idempotency marker — see BillingController::
+            handleCaptureRefunded's doc comment for why both event types
+            share one handler.
+          * Any other event type is acknowledged with 200 and NOT acted on.
+        200 is returned for every signature-valid event that was either
+        applied or safely no-op'd; a signature-valid event this handler
+        FAILED to process (a malformed body, or a refund/reversal it
+        couldn't resolve/apply) answers 5xx so PayPal retries instead of the
+        event being silently dropped.
       tags: [billing]
       requestBody:
         required: true
@@ -1375,4 +1381,4 @@ paths:
               schema: { $ref: '#/components/schemas/WebhookAckResponse' }
         '401': { description: "Signature verification failed (malformed body, missing paypal-* headers, or PayPal reported the signature invalid) — nothing credited/refunded" }
         '404': { description: Billing module disabled }
-        '500': { description: "PayPal's own verify-webhook-signature API was unreachable or answered non-2xx — retry later" }
+        '500': { description: "PayPal's own verify-webhook-signature API was unreachable/non-2xx, OR a signature-valid event could not be processed (malformed shape, or a refund/reversal that couldn't be resolved/applied) — retry later; nothing was silently dropped" }
