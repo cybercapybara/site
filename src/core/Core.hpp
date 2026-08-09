@@ -550,8 +550,19 @@ private:
                 return;
             try {
                 auto lag = Database::get().execute_read([](auto& txn) -> std::optional<double> {
-                    auto r =
-                        txn.exec("SELECT EXTRACT(EPOCH FROM (now() - pg_last_xact_replay_timestamp()))::float8 AS lag");
+                    // pg_last_xact_replay_timestamp() alone measures "time since the
+                    // last replayed COMMIT" — on an idle primary that grows without
+                    // bound even though the replica is perfectly caught up (observed
+                    // in prod: 5.5 h of "lag" on a quiet database). Compare the LSNs
+                    // first: received == replayed means zero lag, whatever the clock
+                    // says. Only when the replica genuinely trails does the timestamp
+                    // difference mean anything.
+                    auto r = txn.exec(
+                        "SELECT CASE"
+                        "         WHEN NOT pg_is_in_recovery() THEN NULL"
+                        "         WHEN pg_last_wal_receive_lsn() = pg_last_wal_replay_lsn() THEN 0"
+                        "         ELSE EXTRACT(EPOCH FROM (now() - pg_last_xact_replay_timestamp()))"
+                        "       END::float8 AS lag");
                     if (r.empty() || r[0]["lag"].is_null())
                         return std::nullopt;  // landed on the primary / nothing replayed yet
                     return r[0]["lag"].template as<double>();
