@@ -73,7 +73,7 @@ TEST(PayPalClient, ParseCaptureExtractsIdAndIntegerCents) {
 TEST(PayPalClient, ParseCaptureExtractsNonCompletedStatusVerbatim) {
     // PayPal answers 2xx for a PENDING or DECLINED capture too — the parser
     // must hand the real status back unmodified, not silently normalize it.
-    for (const std::string& status : {"PENDING", "DECLINED"}) {
+    for (const std::string& status : {std::string("PENDING"), std::string("DECLINED")}) {
         const std::string body = R"JSON({
             "purchase_units": [
                 {
