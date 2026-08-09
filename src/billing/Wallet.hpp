@@ -77,9 +77,8 @@ namespace Billing {
  */
 struct InsufficientBalance : Repositories::ConflictError {
     InsufficientBalance()
-        : Repositories::ConflictError(
-              "insufficient_balance",
-              "This adjustment would drive the wallet balance negative") {}
+        : Repositories::ConflictError("insufficient_balance",
+                                      "This adjustment would drive the wallet balance negative") {}
 };
 
 /**
@@ -93,9 +92,8 @@ struct InsufficientBalance : Repositories::ConflictError {
  */
 struct DuplicateCaptureId : Repositories::ConflictError {
     DuplicateCaptureId()
-        : Repositories::ConflictError(
-              "capture_id_conflict",
-              "This capture id is already recorded against a different payment") {}
+        : Repositories::ConflictError("capture_id_conflict",
+                                      "This capture id is already recorded against a different payment") {}
 };
 
 /**

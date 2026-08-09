@@ -645,14 +645,13 @@ TEST_F(WalletTest, PackageRepositoryUpdateKeepsOmittedFields) {
     EXPECT_FALSE(updated.active);
     EXPECT_EQ(updated.sort, 1);  // unchanged
 
-    EXPECT_THROW(
-        packages.update("00000000-0000-0000-0000-000000000000",
-                        std::string("x"),
-                        std::nullopt,
-                        std::nullopt,
-                        std::nullopt,
-                        std::nullopt),
-        Repositories::PackageNotFound);
+    EXPECT_THROW(packages.update("00000000-0000-0000-0000-000000000000",
+                                 std::string("x"),
+                                 std::nullopt,
+                                 std::nullopt,
+                                 std::nullopt,
+                                 std::nullopt),
+                 Repositories::PackageNotFound);
 }
 
 TEST_F(WalletTest, PackageRepositoryRemoveDeletesRow) {
