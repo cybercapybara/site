@@ -24,11 +24,18 @@
  *   billing.paypal.return_url     string  default ""
  *   billing.paypal.cancel_url     string  default ""
  *
- * get() is a lazy Meyers singleton (mirrors Jobs::Dispatcher::get() in
- * src/jobs/Dispatcher.hpp), configured from Config on first call — which in
- * practice always happens well after Core::Application::initialize() has
- * already run Config::initialize(). No explicit wiring into Core.hpp is
- * needed for that reason.
+ * Billing::initialize()/install_for_testing()/reset_for_testing() mirror
+ * Storage::/Email::'s module test-seam shape (see the bottom of
+ * src/storage/Storage.hpp): initialize() validates billing.paypal.* config
+ * (throwing if billing.enabled=true and client_id/client_secret are empty)
+ * and installs the production singleton; install_for_testing() lets Task 4/5
+ * controller tests inject a fake/mock subclass instead of touching the
+ * network. PayPalClient::get() — a class static method, per this module's
+ * documented interface — lazily calls initialize() on first use if nothing
+ * installed a client yet, so production code needs no explicit Core.hpp
+ * wiring to keep working; an earlier explicit Billing::initialize() call
+ * (e.g. from Core.hpp, if a future task wires it there) simply makes
+ * misconfiguration fail at boot instead of on the first request.
  *
  * Every method that talks to PayPal (create_order, capture_order,
  * verify_webhook_signature's own call to PayPal) throws std::runtime_error
@@ -47,6 +54,7 @@
 #include <chrono>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
@@ -203,6 +211,53 @@ inline std::size_t curl_write_cb(char* ptr, std::size_t size, std::size_t nmemb,
     return size * nmemb;
 }
 
+/// Best-effort extraction of PayPal's structured error fields from a
+/// non-2xx response BODY, for inclusion in a thrown error message.
+/// Orders/Payments/webhook-verify errors look like `{"name":...,
+/// "message":..., "debug_id":...}`; OAuth errors look like
+/// `{"error":..., "error_description":...}`. Without `debug_id`, PayPal
+/// support cannot look anything up, and Task 4/5 need to surface these to
+/// admins — silently keeping only the HTTP status throws that away.
+///
+/// Falls back to the raw body (truncated to @p kMaxRaw bytes, so one
+/// unexpectedly huge error page can't make the exception message itself a
+/// problem) when the body isn't JSON, isn't an object, or doesn't contain
+/// any of the known fields. NEVER receives request headers or the token —
+/// this only ever sees a RESPONSE body.
+inline std::string describe_error_body(const std::string& resp_body) {
+    constexpr std::size_t kMaxRaw = 500;
+    const auto truncated = [&](const std::string& s) {
+        return s.size() <= kMaxRaw ? s : s.substr(0, kMaxRaw) + "...(truncated)";
+    };
+
+    json j;
+    try {
+        j = json::parse(resp_body);
+    } catch (const json::parse_error&) {
+        return truncated(resp_body);
+    }
+    if (!j.is_object())
+        return truncated(resp_body);
+
+    std::string out;
+    auto append_field = [&](const char* key) {
+        if (j.contains(key) && j[key].is_string()) {
+            if (!out.empty())
+                out += " ";
+            out += std::string(key) + "=" + j[key].get<std::string>();
+        }
+    };
+    append_field("name");
+    append_field("message");
+    append_field("debug_id");
+    append_field("error");
+    append_field("error_description");
+
+    // Valid JSON, but none of the known fields — still surface something
+    // rather than silently saying nothing.
+    return out.empty() ? truncated(j.dump()) : out;
+}
+
 }  // namespace detail
 
 /// Construction config for PayPalClient — kept as a free struct (not a
@@ -233,6 +288,13 @@ public:
             cfg_.connect_timeout_sec = 3;
     }
 
+    // Virtual so tests can install a fake/mock subclass via
+    // install_for_testing() below that overrides create_order/capture_order/
+    // verify_webhook_signature to return canned data with no network call —
+    // otherwise install_for_testing() could only swap credentials, not
+    // actually keep Task 4/5's controller tests off the network.
+    virtual ~PayPalClient() = default;
+
     /// sandbox -> api-m.sandbox.paypal.com, live -> api-m.paypal.com, any
     /// other/unknown value -> sandbox. Fails SAFE: a config typo must never
     /// accidentally start moving real money against the live API.
@@ -242,27 +304,27 @@ public:
         return "https://api-m.sandbox.paypal.com";
     }
 
-    /// Lazy Meyers singleton, configured from Config on first call (mirrors
-    /// Jobs::Dispatcher::get()). Safe to call any time after
-    /// Core::Application::initialize() has run Config::initialize(); if
-    /// Config was never initialized (e.g. a narrow unit test that never
-    /// boots Core), falls back to all-default/empty config rather than
-    /// throwing — callers that actually invoke network methods on that
-    /// instance will simply get PayPal 401s, not a crash at construction.
-    static PayPalClient& get() {
-        static PayPalClient instance(load_config_from_global());
-        return instance;
-    }
+    /// Production accessor. Defined out-of-line below (after the
+    /// initialize()/install_for_testing()/reset_for_testing() test-seam
+    /// section), because it needs std::unique_ptr<PayPalClient> to be a
+    /// complete type. Lazily calls initialize() on first use if nothing
+    /// installed it yet, so production code keeps working with zero
+    /// required wiring — but Core.hpp (or Task 4/5's controller
+    /// registration) MAY call Billing::initialize() explicitly earlier to
+    /// fail fast at boot instead of on the first request. Throws
+    /// std::runtime_error if billing.enabled=true and client_id/
+    /// client_secret are empty (see initialize()).
+    static PayPalClient& get();
 
     /// POST /v2/checkout/orders. `reference` becomes purchase_units[0].
     /// reference_id (the app's own order/payment id, for reconciliation on
     /// PayPal's dashboard). Throws std::runtime_error on transport/non-2xx
     /// or a response missing an id / an "approve" link.
-    PayPalOrder create_order(std::int64_t amount_cents,
-                             const std::string& currency,
-                             const std::string& reference,
-                             const std::string& return_url,
-                             const std::string& cancel_url) {
+    virtual PayPalOrder create_order(std::int64_t amount_cents,
+                                     const std::string& currency,
+                                     const std::string& reference,
+                                     const std::string& return_url,
+                                     const std::string& cancel_url) {
         json amount = json::object();
         amount["currency_code"] = currency;
         amount["value"] = detail::cents_to_decimal_string(amount_cents);
@@ -284,7 +346,8 @@ public:
         std::string resp_body;
         const long code = authorized_request("POST", "/v2/checkout/orders", body.dump(), &resp_body);
         if (code < 200 || code >= 300)
-            throw std::runtime_error("paypal: create_order failed with HTTP " + std::to_string(code));
+            throw std::runtime_error("paypal: create_order failed with HTTP " + std::to_string(code) + ": " +
+                                     detail::describe_error_body(resp_body));
 
         json j;
         try {
@@ -314,14 +377,15 @@ public:
     /// POST /v2/checkout/orders/{order_id}/capture. Throws
     /// std::runtime_error on transport/non-2xx or a malformed response body
     /// (see parse_capture_response).
-    PayPalCapture capture_order(const std::string& order_id) {
+    virtual PayPalCapture capture_order(const std::string& order_id) {
         if (order_id.empty())
             throw std::runtime_error("paypal: capture_order: empty order_id");
         std::string resp_body;
         const long code = authorized_request(
             "POST", "/v2/checkout/orders/" + detail::url_encode_segment(order_id) + "/capture", "{}", &resp_body);
         if (code < 200 || code >= 300)
-            throw std::runtime_error("paypal: capture_order failed with HTTP " + std::to_string(code));
+            throw std::runtime_error("paypal: capture_order failed with HTTP " + std::to_string(code) + ": " +
+                                     detail::describe_error_body(resp_body));
         return parse_capture_response(resp_body);
     }
 
@@ -342,7 +406,8 @@ public:
     /// not be reported to a caller as if the signature were checked and
     /// failed (a caller that conflated the two could log a benign PayPal
     /// outage as a spoofed-webhook security incident).
-    bool verify_webhook_signature(const std::map<std::string, std::string>& headers, const std::string& raw_body) {
+    virtual bool verify_webhook_signature(const std::map<std::string, std::string>& headers,
+                                          const std::string& raw_body) {
         json event;
         try {
             event = json::parse(raw_body);
@@ -375,7 +440,8 @@ public:
         const long code =
             authorized_request("POST", "/v1/notifications/verify-webhook-signature", verify_req.dump(), &resp_body);
         if (code < 200 || code >= 300)
-            throw std::runtime_error("paypal: verify-webhook-signature failed with HTTP " + std::to_string(code));
+            throw std::runtime_error("paypal: verify-webhook-signature failed with HTTP " + std::to_string(code) +
+                                     ": " + detail::describe_error_body(resp_body));
 
         json j;
         try {
@@ -426,31 +492,27 @@ public:
     }
 
 private:
-    static PayPalClientConfig load_config_from_global() {
-        PayPalClientConfig cfg;
-        if (!Config::is_initialized())
-            return cfg;
-        auto& c = Config::get();
-        cfg.environment = c.get<std::string>("billing.paypal.environment", "PAYPAL_ENV", "sandbox");
-        cfg.client_id = c.get<std::string>("billing.paypal.client_id", "PAYPAL_CLIENT_ID", "");
-        cfg.client_secret = c.get<std::string>("billing.paypal.client_secret", "PAYPAL_CLIENT_SECRET", "");
-        cfg.webhook_id = c.get<std::string>("billing.paypal.webhook_id", "PAYPAL_WEBHOOK_ID", "");
-        cfg.return_url = c.get<std::string>("billing.paypal.return_url", "PAYPAL_RETURN_URL", "");
-        cfg.cancel_url = c.get<std::string>("billing.paypal.cancel_url", "PAYPAL_CANCEL_URL", "");
-        return cfg;
-    }
-
     /// POST /v1/oauth2/token with HTTP Basic auth (client_id/client_secret
     /// handed straight to libcurl's CURLOPT_USERNAME/PASSWORD — we never
     /// build the "Authorization: Basic ..." string ourselves, so there is
     /// nothing home-grown to accidentally log). Caches the token in-process
     /// until `expires_in - 60s`; a request that arrives inside that 60s
     /// safety margin never races an in-flight expiry.
+    ///
+    /// Double-checked: the fast "is my cached token still good" check runs
+    /// under token_mutex_, but the OAuth network round-trip itself runs
+    /// WITHOUT holding it — otherwise every concurrent billing request
+    /// queues behind one slow/blackholed token endpoint for up to
+    /// timeout_sec, not just the request that triggered the refresh. The
+    /// lock is re-taken only to publish the result, re-checking first
+    /// whether another thread already refreshed while we were making our
+    /// own (possibly redundant, but harmless — both are valid) request.
     void ensure_access_token() {
-        std::lock_guard<std::mutex> lock(token_mutex_);
-        const auto now = std::chrono::steady_clock::now();
-        if (!access_token_.empty() && now < token_expiry_)
-            return;
+        {
+            std::lock_guard<std::mutex> lock(token_mutex_);
+            if (!access_token_.empty() && std::chrono::steady_clock::now() < token_expiry_)
+                return;
+        }
 
         CURL* h = curl_easy_init();
         if (!h)
@@ -489,7 +551,8 @@ private:
         if (rc != CURLE_OK)
             throw std::runtime_error(std::string("paypal: oauth transport error: ") + curl_easy_strerror(rc));
         if (code < 200 || code >= 300)
-            throw std::runtime_error("paypal: oauth token request failed with HTTP " + std::to_string(code));
+            throw std::runtime_error("paypal: oauth token request failed with HTTP " + std::to_string(code) + ": " +
+                                     detail::describe_error_body(resp_body));
 
         json j;
         try {
@@ -502,9 +565,22 @@ private:
             throw std::runtime_error("paypal: oauth response missing access_token");
 
         const std::int64_t expires_in = j.value("expires_in", static_cast<std::int64_t>(0));
-        access_token_ = j["access_token"].get<std::string>();
+        const std::string new_token = j["access_token"].get<std::string>();
         const std::int64_t safe_ttl = expires_in > 60 ? expires_in - 60 : 0;
-        token_expiry_ = now + std::chrono::seconds(safe_ttl);
+        const auto new_expiry = std::chrono::steady_clock::now() + std::chrono::seconds(safe_ttl);
+
+        {
+            std::lock_guard<std::mutex> lock(token_mutex_);
+            // Re-check: another thread may have refreshed while we were
+            // doing our own round-trip outside the lock. If its token is
+            // already valid, there's nothing to fix — both refreshes are
+            // equally good, so just keep whichever landed first rather than
+            // clobbering it with ours.
+            if (access_token_.empty() || std::chrono::steady_clock::now() >= token_expiry_) {
+                access_token_ = new_token;
+                token_expiry_ = new_expiry;
+            }
+        }
 
         // Never log the token itself — only that one was obtained and for
         // how long it's cached.
@@ -577,5 +653,78 @@ private:
     std::string access_token_;
     std::chrono::steady_clock::time_point token_expiry_{};
 };
+
+// ── Config loading + global accessor / test seam ────────────────────────────
+// Mirrors Storage::/Email::'s initialize()/install_for_testing()/
+// reset_for_testing() shape (see src/storage/Storage.hpp's bottom section)
+// so Tasks 4/5 can inject a fake PayPalClient subclass in controller tests
+// instead of ever touching the network. PayPalClient::get() itself stays a
+// class static method (its documented public interface), but is defined
+// out-of-line below, after global_paypal_client, because it needs
+// std::unique_ptr<PayPalClient> to be a complete type.
+
+inline PayPalClientConfig load_config_from_global() {
+    PayPalClientConfig cfg;
+    if (!Config::is_initialized())
+        return cfg;
+    auto& c = Config::get();
+    cfg.environment = c.get<std::string>("billing.paypal.environment", "PAYPAL_ENV", "sandbox");
+    cfg.client_id = c.get<std::string>("billing.paypal.client_id", "PAYPAL_CLIENT_ID", "");
+    cfg.client_secret = c.get<std::string>("billing.paypal.client_secret", "PAYPAL_CLIENT_SECRET", "");
+    cfg.webhook_id = c.get<std::string>("billing.paypal.webhook_id", "PAYPAL_WEBHOOK_ID", "");
+    cfg.return_url = c.get<std::string>("billing.paypal.return_url", "PAYPAL_RETURN_URL", "");
+    cfg.cancel_url = c.get<std::string>("billing.paypal.cancel_url", "PAYPAL_CANCEL_URL", "");
+    return cfg;
+}
+
+inline std::unique_ptr<PayPalClient> global_paypal_client = nullptr;
+
+inline bool is_initialized() {
+    return global_paypal_client != nullptr;
+}
+
+/// Reads billing.paypal.* (and billing.enabled) from Config and installs the
+/// production singleton. Throws std::runtime_error if billing.enabled=true
+/// and client_id/client_secret are empty — fail loud rather than 500ing on
+/// the first real checkout attempt (mirrors S3Storage::initialize throwing
+/// when storage.backend=s3 is missing its endpoint/bucket, Storage.hpp
+/// around line 506). When billing is disabled (or Config was never
+/// initialized — a narrow unit test that never boots Core), an empty/default
+/// config is installed without validation, matching how the rest of this
+/// module treats "billing off" as a no-op rather than an error.
+///
+/// Idempotent: a no-op if a client is already installed, whether by an
+/// earlier call to this function OR by install_for_testing() — so it's safe
+/// for get() to call this defensively below without ever clobbering a test
+/// double a caller already installed.
+inline void initialize() {
+    if (global_paypal_client != nullptr)
+        return;
+    PayPalClientConfig cfg = load_config_from_global();
+    const bool billing_on =
+        Config::is_initialized() && Config::get().get<bool>("billing.enabled", "BILLING_ENABLED", false);
+    if (billing_on && (cfg.client_id.empty() || cfg.client_secret.empty()))
+        throw std::runtime_error(
+            "billing.paypal.client_id / billing.paypal.client_secret must be set when billing.enabled=true");
+    global_paypal_client = std::make_unique<PayPalClient>(std::move(cfg));
+}
+
+/// Test seam: install a fake/mock PayPalClient (a test-only subclass
+/// overriding create_order/capture_order/verify_webhook_signature) so
+/// controller tests (Task 4/5) can exercise the checkout/capture/webhook
+/// flow with no network access. Mirrors Storage::install_for_testing.
+inline void install_for_testing(std::unique_ptr<PayPalClient> client) {
+    global_paypal_client = std::move(client);
+}
+
+inline void reset_for_testing() {
+    global_paypal_client.reset();
+}
+
+inline PayPalClient& PayPalClient::get() {
+    if (!global_paypal_client)
+        initialize();
+    return *global_paypal_client;
+}
 
 }  // namespace Billing
