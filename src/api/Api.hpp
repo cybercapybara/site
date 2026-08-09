@@ -24,6 +24,7 @@
 #include "api/ApiKeyController.hpp"
 #include "api/AuditController.hpp"
 #include "api/AuthController.hpp"
+#include "api/BillingController.hpp"
 #include "api/ContentPagesController.hpp"
 #include "api/HealthController.hpp"
 #include "api/JobsController.hpp"

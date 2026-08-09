@@ -78,6 +78,10 @@ inline const std::vector<EndpointInfo>& get_endpoints() {
         {"GET", "/api/v1/admin/uploads", "Admin: list uploaded images"},
         {"DELETE", "/api/v1/admin/uploads/{name}", "Admin: delete an uploaded image"},
         {"GET", "/uploads/{key}", "Serve an uploaded image (public; local storage backend only)"},
+        {"GET", "/api/v1/billing/packages", "List active top-up packages"},
+        {"GET", "/api/v1/billing/wallet", "Get your own wallet balance + ledger history"},
+        {"POST", "/api/v1/billing/topup", "Start a PayPal top-up (package or custom amount)"},
+        {"POST", "/api/v1/billing/capture", "Capture an approved PayPal order and credit your wallet"},
     };
     return endpoints;
 }

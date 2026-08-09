@@ -237,6 +237,83 @@ components:
       properties:
         message: { type: string }
 
+    # Mirrors Domain::to_json(Package) in src/domain/Billing.hpp.
+    BillingPackage:
+      type: object
+      required: [id, title, amount_cents, credits, active, sort, created_at, updated_at]
+      properties:
+        id:           { type: string, format: uuid }
+        title:        { type: string }
+        amount_cents: { type: integer, format: int64 }
+        credits:      { type: integer, format: int64 }
+        active:       { type: boolean }
+        sort:         { type: integer }
+        created_at:   { type: string }
+        updated_at:   { type: string }
+
+    BillingPackageListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/BillingPackage' }
+
+    # Mirrors Domain::to_json(WalletEntry) in src/domain/Billing.hpp.
+    WalletEntry:
+      type: object
+      required: [id, user_id, delta_credits, kind, reference, note, created_at]
+      properties:
+        id:            { type: string, format: uuid }
+        user_id:       { type: string, format: uuid }
+        delta_credits: { type: integer, format: int64 }
+        kind:          { type: string, enum: [topup, spend, adjustment, refund] }
+        reference:     { type: string }
+        note:          { type: string }
+        created_by:    { type: ['string', 'null'], format: uuid }
+        created_at:    { type: string }
+
+    # GET /api/v1/billing/wallet. Mirrors BillingController::getWallet.
+    WalletResponse:
+      type: object
+      required: [data, limit, offset]
+      properties:
+        data:
+          type: object
+          required: [balance, history]
+          properties:
+            balance: { type: integer, format: int64 }
+            history:
+              type: array
+              items: { $ref: '#/components/schemas/WalletEntry' }
+        limit:  { type: integer }
+        offset: { type: integer }
+
+    # POST /api/v1/billing/topup. Mirrors BillingController::topup — the
+    # approve URL only; no credit count is ever present here.
+    TopupResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [order_id, approve_url]
+          properties:
+            order_id:    { type: string, description: PayPal order id — pass back to POST .../capture }
+            approve_url: { type: string, format: uri, description: Redirect the buyer here to approve the order on PayPal }
+
+    # POST /api/v1/billing/capture. Mirrors BillingController::capture.
+    CaptureResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [credited, balance]
+          properties:
+            credited: { type: boolean, description: "false on an idempotent replay of an already-captured order" }
+            balance:  { type: integer, format: int64, description: Wallet balance AFTER this call }
+
 # -----------------------------------------------------------------------------
 paths:
   /:
@@ -1101,3 +1178,97 @@ paths:
         '403': { description: Not an admin }
         '404': { description: "Content module disabled, or no such upload" }
         '503': { description: Storage backend not configured }
+
+  # ── Billing (user-facing wallet/PayPal top-up; require billing.enabled) ────
+  /api/v1/billing/packages:
+    get:
+      summary: List active top-up packages
+      tags: [billing]
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: Active packages, catalogue order
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BillingPackageListResponse' }
+        '401': { description: Not authenticated }
+        '404': { description: Billing module disabled }
+  /api/v1/billing/wallet:
+    get:
+      summary: Get your own wallet balance + ledger history
+      description: >
+        Always the authenticated caller's own wallet — no user-id parameter
+        of any kind is accepted, by design (see BillingController::getWallet).
+      tags: [billing]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { name: limit,  in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        '200':
+          description: Balance + ledger page, newest first
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WalletResponse' }
+        '401': { description: Not authenticated }
+        '404': { description: Billing module disabled }
+  /api/v1/billing/topup:
+    post:
+      summary: Start a PayPal top-up (package or custom amount)
+      description: >
+        Provide exactly one of package_id or amount_cents. Credits are always
+        computed server-side (package.credits, or amount_cents *
+        billing.credits_per_unit / 100) — any "credits" field in the body is
+        ignored entirely. amount_cents (custom top-ups only) is bounded by
+        billing.min_amount_cents / billing.max_amount_cents.
+      tags: [billing]
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                package_id:   { type: string, format: uuid, description: "Mutually exclusive with amount_cents" }
+                amount_cents: { type: integer, format: int64, minimum: 1, description: "Mutually exclusive with package_id" }
+      responses:
+        '201':
+          description: PayPal order created — redirect the buyer to data.approve_url
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TopupResponse' }
+        '400': { description: "Neither/both of package_id+amount_cents given, amount_cents out of [min,max], or malformed input" }
+        '401': { description: Not authenticated }
+        '404': { description: Billing module disabled, or package_id does not name an active package }
+        '409': { description: provider_order_id already recorded (PayPal order id collision) }
+  /api/v1/billing/capture:
+    post:
+      summary: Capture an approved PayPal order and credit your wallet
+      description: >
+        order_id must belong to the authenticated caller — verified via
+        PaymentRepository::find_owned before any capture is attempted, so one
+        user can never capture (and collect credits for) another user's
+        order. Idempotent: capturing an already-captured order returns
+        credited=false with the unchanged balance instead of calling PayPal
+        again.
+      tags: [billing]
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [order_id]
+              properties:
+                order_id: { type: string, description: PayPal order id, as returned by POST .../topup }
+      responses:
+        '200':
+          description: Captured (or replayed idempotently) — wallet balance after this call
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaptureResponse' }
+        '400': { description: order_id missing or not a string }
+        '401': { description: Not authenticated }
+        '404': { description: "Billing module disabled, or no such order for this caller" }
