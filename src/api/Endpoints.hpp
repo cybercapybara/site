@@ -82,7 +82,9 @@ inline const std::vector<EndpointInfo>& get_endpoints() {
         {"GET", "/api/v1/billing/wallet", "Get your own wallet balance + ledger history"},
         {"POST", "/api/v1/billing/topup", "Start a PayPal top-up (package or custom amount)"},
         {"POST", "/api/v1/billing/capture", "Capture an approved PayPal order and credit your wallet"},
-        {"POST", "/api/v1/billing/paypal/webhook", "PayPal webhook: signature-verified capture/refund notifications (public)"},
+        {"POST",
+         "/api/v1/billing/paypal/webhook",
+         "PayPal webhook: signature-verified capture/refund notifications (public)"},
     };
     return endpoints;
 }

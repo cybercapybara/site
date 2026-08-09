@@ -200,9 +200,8 @@ protected:
 
     json do_capture(const Security::Auth::AuthPrincipal& p, const std::string& order_id, int* status = nullptr) {
         HttpResponsePtr resp;
-        controller.capture(TestHelpers::authed_json(p, json{{"order_id", order_id}}), [&](const HttpResponsePtr& r) {
-            resp = r;
-        });
+        controller.capture(TestHelpers::authed_json(p, json{{"order_id", order_id}}),
+                           [&](const HttpResponsePtr& r) { resp = r; });
         if (status)
             *status = resp->statusCode();
         return json::parse(std::string(resp->body()));
@@ -325,8 +324,8 @@ TEST_F(BillingApiTest, TopupWithPackageFreezesRateAndCredits) {
 
     auto payment = payments.find_by_order_id("ORDER-PKG-1");
     ASSERT_TRUE(payment.has_value());
-    EXPECT_EQ(payment->credits_expected, 500);       // package.credits, verbatim
-    EXPECT_EQ(payment->rate_snapshot, 100);           // billing.credits_per_unit at the time of purchase
+    EXPECT_EQ(payment->credits_expected, 500);  // package.credits, verbatim
+    EXPECT_EQ(payment->rate_snapshot, 100);     // billing.credits_per_unit at the time of purchase
     EXPECT_EQ(payment->amount_cents, 400);
     ASSERT_TRUE(payment->package_id.has_value());
     EXPECT_EQ(*payment->package_id, pkg.id);
@@ -625,7 +624,8 @@ TEST_F(BillingApiTest, WebhookRejectsInvalidSignature) {
     fake->verify_signature_result = false;
 
     int status = 0;
-    auto body = do_webhook(capture_completed_event("WH-BADSIG-1", "ORDER-BADSIG-1", "CAPTURE-BADSIG-1", "10.00"), &status);
+    auto body =
+        do_webhook(capture_completed_event("WH-BADSIG-1", "ORDER-BADSIG-1", "CAPTURE-BADSIG-1", "10.00"), &status);
     EXPECT_EQ(status, k401Unauthorized);
     EXPECT_EQ(body["error"], "invalid_signature");
 
@@ -647,9 +647,8 @@ TEST_F(BillingApiTest, WebhookVerificationApiUnreachableReturns5xx) {
     fake->verify_throw_message = "paypal: verify-webhook-signature failed with HTTP 503: service unavailable";
 
     int status = 0;
-    auto body =
-        do_webhook(capture_completed_event("WH-UNREACHABLE-1", "ORDER-UNREACHABLE-1", "CAPTURE-UNREACHABLE-1", "10.00"),
-                  &status);
+    auto body = do_webhook(
+        capture_completed_event("WH-UNREACHABLE-1", "ORDER-UNREACHABLE-1", "CAPTURE-UNREACHABLE-1", "10.00"), &status);
     EXPECT_GE(status, 500);
     EXPECT_LT(status, 600);
     EXPECT_EQ(body["error"], "internal_error");
@@ -701,10 +700,10 @@ TEST_F(BillingApiTest, WebhookAfterCaptureIsNoop) {
     ASSERT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 1000);
 
     int status = 0;
-    auto body = do_webhook(
-        capture_completed_event(
-            "WH-AFTERRETURN-1", "ORDER-AFTERRETURN-1", fake->next_capture_id /* same capture id */, "10.00"),
-        &status);
+    auto body =
+        do_webhook(capture_completed_event(
+                       "WH-AFTERRETURN-1", "ORDER-AFTERRETURN-1", fake->next_capture_id /* same capture id */, "10.00"),
+                   &status);
     EXPECT_EQ(status, k200OK);
     EXPECT_TRUE(body["data"]["handled"].get<bool>());
 
@@ -748,7 +747,7 @@ TEST_F(BillingApiTest, WebhookResolvesPendingCaptureExactlyOnce) {
     auto second_body = do_webhook(event, &second_status);
     EXPECT_EQ(second_status, k200OK);
     EXPECT_TRUE(second_body["data"]["handled"].get<bool>());
-    EXPECT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 1000);  // unchanged
+    EXPECT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 1000);           // unchanged
     EXPECT_EQ(Billing::history(user.subject, 10, 0, /*from_primary=*/true).size(), 1u);  // still exactly one row
 }
 
@@ -764,14 +763,14 @@ TEST_F(BillingApiTest, WebhookRefundWritesNegativeEntry) {
     ASSERT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 1000);
 
     int status = 0;
-    auto body = do_webhook(
-        capture_refunded_event("WH-REFUND-1", "REFUND-WH-1", fake->next_capture_id, "10.00"), &status);
+    auto body =
+        do_webhook(capture_refunded_event("WH-REFUND-1", "REFUND-WH-1", fake->next_capture_id, "10.00"), &status);
     EXPECT_EQ(status, k200OK);
     EXPECT_TRUE(body["data"]["handled"].get<bool>());
 
     EXPECT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 0);
     auto hist = Billing::history(user.subject, 10, 0, /*from_primary=*/true);
-    ASSERT_EQ(hist.size(), 2u);  // topup + refund
+    ASSERT_EQ(hist.size(), 2u);          // topup + refund
     const auto& refund_entry = hist[0];  // newest first
     EXPECT_EQ(refund_entry.kind, "refund");
     EXPECT_EQ(refund_entry.delta_credits, -1000);
@@ -844,14 +843,15 @@ TEST_F(BillingApiTest, WebhookReversalEventIsAcknowledgedButNotApplied) {
     auto balance_before = Billing::balance_of(user.subject, /*from_primary=*/true);
     auto hist_before = Billing::history(user.subject, 10, 0, /*from_primary=*/true).size();
 
-    json reversal = {{"id", "WH-REVERSED-1"},
-                     {"event_type", "PAYMENT.CAPTURE.REVERSED"},
-                     {"resource",
-                      {{"id", "REFUND-REVERSED-1"},
-                       {"links",
-                        json::array({{{"rel", "up"},
-                                      {"href", "https://api.sandbox.paypal.com/v2/payments/captures/" +
-                                                   fake->next_capture_id}}})}}}};
+    json reversal = {
+        {"id", "WH-REVERSED-1"},
+        {"event_type", "PAYMENT.CAPTURE.REVERSED"},
+        {"resource",
+         {{"id", "REFUND-REVERSED-1"},
+          {"links",
+           json::array(
+               {{{"rel", "up"},
+                 {"href", "https://api.sandbox.paypal.com/v2/payments/captures/" + fake->next_capture_id}}})}}}};
     int status = 0;
     auto body = do_webhook(reversal, &status);
     EXPECT_EQ(status, k200OK);
@@ -956,14 +956,12 @@ TEST_F(BillingDisabledApiTest, AllRoutes404WhenBillingDisabled) {
     controller.getWallet(TestHelpers::authed(user), [&](const HttpResponsePtr& r) { resp = r; });
     EXPECT_EQ(resp->statusCode(), k404NotFound);
 
-    controller.topup(TestHelpers::authed_json(user, json{{"amount_cents", 500}}), [&](const HttpResponsePtr& r) {
-        resp = r;
-    });
+    controller.topup(TestHelpers::authed_json(user, json{{"amount_cents", 500}}),
+                     [&](const HttpResponsePtr& r) { resp = r; });
     EXPECT_EQ(resp->statusCode(), k404NotFound);
 
-    controller.capture(TestHelpers::authed_json(user, json{{"order_id", "X"}}), [&](const HttpResponsePtr& r) {
-        resp = r;
-    });
+    controller.capture(TestHelpers::authed_json(user, json{{"order_id", "X"}}),
+                       [&](const HttpResponsePtr& r) { resp = r; });
     EXPECT_EQ(resp->statusCode(), k404NotFound);
 }
 

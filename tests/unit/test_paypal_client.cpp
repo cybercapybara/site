@@ -81,9 +81,9 @@ TEST(PayPalClient, ParseCaptureExtractsNonCompletedStatusVerbatim) {
                         "captures": [
                             {
                                 "id": "CAP-)JSON" +
-                                     status + R"JSON(",
+                                 status + R"JSON(",
                                 "status": ")JSON" +
-                                     status + R"JSON(",
+                                 status + R"JSON(",
                                 "amount": { "currency_code": "USD", "value": "5.00" }
                             }
                         ]
@@ -118,9 +118,8 @@ TEST(PayPalClient, ParseCaptureRejectsMalformedBody) {
     // never silently default to an empty (falsy-looking, but NOT "COMPLETED")
     // status; a caller comparing against "COMPLETED" would treat that as
     // "not completed" today, but requiring it up front removes any doubt.
-    EXPECT_THROW(PayPalClient::parse_capture_response(
-                     R"({"purchase_units":[{"payments":{"captures":[{"id":"c1",)"
-                     R"("amount":{"value":"1.00","currency_code":"USD"}}]}}]})"),
+    EXPECT_THROW(PayPalClient::parse_capture_response(R"({"purchase_units":[{"payments":{"captures":[{"id":"c1",)"
+                                                      R"("amount":{"value":"1.00","currency_code":"USD"}}]}}]})"),
                  std::runtime_error);
 
     // None of the malformed bodies above may fall through to a default

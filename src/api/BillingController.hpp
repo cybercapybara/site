@@ -154,11 +154,8 @@ public:
             // PayPalClient::create_order's doc comment) — it is never read
             // back and never influences credited amounts.
             const std::string reference = "topup:" + principal->subject;
-            auto order = Billing::PayPalClient::get().create_order(plan.amount_cents,
-                                                                    currency,
-                                                                    reference,
-                                                                    return_url,
-                                                                    cancel_url);
+            auto order = Billing::PayPalClient::get().create_order(
+                plan.amount_cents, currency, reference, return_url, cancel_url);
 
             Repositories::PaymentRepository payments;
             payments.create(principal->subject,
@@ -234,8 +231,8 @@ public:
                 // A clean 409, no PayPal call — capturing an order that's
                 // already failed or refunded on our side can only ever error
                 // on PayPal's side too (or worse, be misleading).
-                callback(ErrorResponse::conflict(
-                    "payment_not_capturable", "This payment is " + owned->status + " and cannot be captured"));
+                callback(ErrorResponse::conflict("payment_not_capturable",
+                                                 "This payment is " + owned->status + " and cannot be captured"));
                 return;
             }
 
@@ -247,8 +244,8 @@ public:
                 // a real, expected 4xx-shaped condition (a client racing the
                 // approve redirect), not a server fault.
                 if (std::string(e.what()).find("ORDER_NOT_APPROVED") != std::string::npos) {
-                    callback(ErrorResponse::conflict("order_not_approved",
-                                                     "This PayPal order has not been approved yet"));
+                    callback(
+                        ErrorResponse::conflict("order_not_approved", "This PayPal order has not been approved yet"));
                     return;
                 }
                 throw;  // anything else: with_repo_errors' outer catch maps it to 500.
@@ -261,11 +258,9 @@ public:
                 // uncaptured (still created/approved) so the webhook (Task 5)
                 // can resolve it once PayPal reaches a final state.
                 const auto balance = Billing::balance_of(principal->subject);
-                callback(Response::ok({{"data",
-                                        {{"credited", false},
-                                         {"balance", balance},
-                                         {"status", cap.status},
-                                         {"pending", true}}}}));
+                callback(Response::ok(
+                    {{"data",
+                      {{"credited", false}, {"balance", balance}, {"status", cap.status}, {"pending", true}}}}));
                 return;
             }
 
@@ -331,7 +326,7 @@ public:
             event = json::parse(raw_body);
         } catch (const json::parse_error& e) {
             spdlog::error("billing webhook: signature-verified body failed to re-parse (unreachable in practice): {}",
-                         e.what());
+                          e.what());
             callback(Response::ok({{"data", {{"handled", false}}}}));
             return;
         }
@@ -404,7 +399,9 @@ private:
     // UPDATE (WHERE provider_capture_id IS NULL) makes a capture already
     // credited via the return flow a true no-op here (credited=false, same
     // balance, no second ledger row).
-    static void handleCaptureCompleted(const json& event, const std::string& event_id, std::function<void(bool)> respond) {
+    static void handleCaptureCompleted(const json& event,
+                                       const std::string& event_id,
+                                       std::function<void(bool)> respond) {
         const json resource = event.value("resource", json::object());
         std::string order_id, capture_id, currency;
         std::int64_t amount_cents = 0;
@@ -412,9 +409,11 @@ private:
             order_id = resource.at("supplementary_data").at("related_ids").at("order_id").get<std::string>();
             capture_id = resource.at("id").get<std::string>();
             currency = resource.at("amount").at("currency_code").get<std::string>();
-            amount_cents = Billing::detail::parse_decimal_to_cents(resource.at("amount").at("value").get<std::string>());
+            amount_cents =
+                Billing::detail::parse_decimal_to_cents(resource.at("amount").at("value").get<std::string>());
         } catch (const std::exception& e) {
-            spdlog::error("billing webhook: malformed PAYMENT.CAPTURE.COMPLETED resource (event {}): {}", event_id, e.what());
+            spdlog::error(
+                "billing webhook: malformed PAYMENT.CAPTURE.COMPLETED resource (event {}): {}", event_id, e.what());
             respond(false);
             return;
         }
@@ -447,17 +446,21 @@ private:
     // (resource.id) as the idempotency key into Billing::refund_capture —
     // per Task 2's report, the durable `billing_refunds` row on that id is
     // what makes a redelivered refund event a true no-op.
-    static void handleCaptureRefunded(const json& event, const std::string& event_id, std::function<void(bool)> respond) {
+    static void handleCaptureRefunded(const json& event,
+                                      const std::string& event_id,
+                                      std::function<void(bool)> respond) {
         const json resource = event.value("resource", json::object());
         std::string refund_id, currency, capture_id;
         std::int64_t amount_cents = 0;
         try {
             refund_id = resource.at("id").get<std::string>();
             currency = resource.at("amount").at("currency_code").get<std::string>();
-            amount_cents = Billing::detail::parse_decimal_to_cents(resource.at("amount").at("value").get<std::string>());
+            amount_cents =
+                Billing::detail::parse_decimal_to_cents(resource.at("amount").at("value").get<std::string>());
             capture_id = extract_capture_id_from_links(resource);
         } catch (const std::exception& e) {
-            spdlog::error("billing webhook: malformed PAYMENT.CAPTURE.REFUNDED resource (event {}): {}", event_id, e.what());
+            spdlog::error(
+                "billing webhook: malformed PAYMENT.CAPTURE.REFUNDED resource (event {}): {}", event_id, e.what());
             respond(false);
             return;
         }
@@ -522,7 +525,9 @@ private:
     // there is nothing this handler CAN do about it today, and refusing the
     // ack would just make PayPal retry an event we're already unable to act
     // on for days.
-    static void handleCaptureReversed(const json& event, const std::string& event_id, std::function<void(bool)> respond) {
+    static void handleCaptureReversed(const json& event,
+                                      const std::string& event_id,
+                                      std::function<void(bool)> respond) {
         const json resource = event.value("resource", json::object());
         const std::string capture_id = extract_capture_id_from_links(resource);
         spdlog::error(
