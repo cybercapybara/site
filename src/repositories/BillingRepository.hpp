@@ -194,16 +194,26 @@ public:
      * @brief PayPal order approved (buyer authorised, not yet captured).
      *        Only fires from `created` so an out-of-order webhook can't
      *        regress an already-captured/refunded payment back to `approved`.
+     *
+     * @return true if the transition applied; false if the order is known
+     *         but no longer in `created` (already approved/captured/failed/
+     *         refunded) — a duplicate or out-of-order APPROVED webhook is a
+     *         no-op, not an error, so PayPal doesn't redeliver it forever.
+     * @throws PaymentNotFound only when @p provider_order_id is genuinely
+     *         unknown.
      */
-    void mark_approved(const std::string& provider_order_id) {
-        Database::get().execute_write([&](auto& txn) {
+    bool mark_approved(const std::string& provider_order_id) {
+        return Database::get().execute_write([&](auto& txn) {
             auto r = txn.exec_params(
                 "UPDATE payments SET status = 'approved' WHERE provider_order_id = $1 AND status = 'created' "
                 "RETURNING id",
                 provider_order_id);
-            if (r.empty())
+            if (!r.empty())
+                return true;
+            auto pr = txn.exec_params("SELECT id FROM payments WHERE provider_order_id = $1", provider_order_id);
+            if (pr.empty())
                 throw PaymentNotFound{};
-            return 0;
+            return false;
         });
     }
 

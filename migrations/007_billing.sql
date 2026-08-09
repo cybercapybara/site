@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS payments (
     amount_cents        BIGINT      NOT NULL CHECK (amount_cents > 0),
     currency            CHAR(3)     NOT NULL DEFAULT 'USD',
     credits_expected    BIGINT      NOT NULL CHECK (credits_expected > 0),
-    rate_snapshot       BIGINT      NOT NULL,          -- credits per 100 cents at creation
+    rate_snapshot       BIGINT      NOT NULL CHECK (rate_snapshot > 0),  -- credits per 100 cents at creation
     package_id          UUID        REFERENCES billing_packages(id) ON DELETE SET NULL,
     status              VARCHAR(16) NOT NULL DEFAULT 'created',  -- created|approved|captured|failed|refunded
     failure_reason      TEXT,
@@ -51,6 +51,12 @@ CREATE TABLE IF NOT EXISTS wallet_entries (
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_wallet_entries_user ON wallet_entries (user_id, created_at DESC);
+-- Refund idempotency key: `reference` carries the PayPal refund id for
+-- kind='refund' rows, so a redelivered refund webhook (or a second, distinct
+-- partial refund on the same capture) can never post twice under the same
+-- refund id. Partial (not a plain UNIQUE on `reference`) because topup/
+-- adjustment rows share the '' default and must not collide with each other.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_wallet_entries_refund_ref ON wallet_entries (reference) WHERE kind = 'refund';
 
 CREATE TABLE IF NOT EXISTS wallet_balances (
     user_id    UUID PRIMARY KEY REFERENCES users(id) ON DELETE RESTRICT,
