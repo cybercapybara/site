@@ -103,10 +103,17 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0  # gitleaks needs history to scan past commits.
+      # The official gitleaks-action requires a PAID license for repos owned by
+      # an ORGANIZATION (it hard-fails with "missing gitleaks license" — a fork
+      # of this template into any org would ship a permanently red gate). The
+      # scanner itself is open source, so run the CLI directly: same rules,
+      # same .gitleaks.toml, no license and no secrets.
       - name: Run gitleaks
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7  # v2.3.9
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo \
+            zricethezav/gitleaks:v8.21.2 detect \
+              --source=/repo --config=/repo/.gitleaks.toml \
+              --redact --verbose --exit-code 1
 
   openapi-drift:
     runs-on: ubuntu-latest
