@@ -31,6 +31,15 @@ namespace Utils::Strings {
  * storage backend, post bodies embed same-origin image URLs
  * (UploadController::serveUpload) that anonymous readers have to be able to
  * fetch.
+ *
+ * `/api/v1/billing/paypal/webhook` is PayPal's own server calling us, not a
+ * browser — there is no session to authenticate against, and the handler
+ * (BillingController::paypalWebhook) verifies PayPal's own request signature
+ * itself before trusting anything in the body. MUST also be added to
+ * `config/config.json`'s `api.public_paths` — that key OVERRIDES this
+ * default entirely rather than merging with it, so adding a route only here
+ * leaves it 401ing in any deployment with a non-default config file (see the
+ * content module's own past incident).
  * (Route globs are spelled without the star in this comment on purpose: a
  * slash-star pair inside a block comment trips -Wcomment, and CI is -Werror.)
  */
@@ -42,7 +51,8 @@ inline constexpr const char* kDefaultPublicPathsCsv =
     "/api/v1/account/reset-password/*,/api/v1/account/change-email/*,"
     "/api/v1/account/join-from-invite/*,"
     "/api/v1/public/posts,/api/v1/public/posts/*,"
-    "/posts/*,/sitemap.xml,/uploads/*";
+    "/posts/*,/sitemap.xml,/uploads/*,"
+    "/api/v1/billing/paypal/webhook";
 
 /**
  * @brief Public endpoints that must STILL be rate-limited despite being
@@ -50,9 +60,12 @@ inline constexpr const char* kDefaultPublicPathsCsv =
  *        login & register (credential stuffing), refresh (token churn),
  *        reset-password-request (mail bomb), the token-bearing links
  *        (reset / confirm / change-email / invite — guessable-token attempts),
- *        and the content module's public surface (posts list/detail, the
+ *        the content module's public surface (posts list/detail, the
  *        Markdown mirror, the sitemap, and served uploads — all reachable by
- *        an anonymous caller, so all are scrapeable without this).
+ *        an anonymous caller, so all are scrapeable without this), and the
+ *        PayPal webhook (a spoofed/replayed flood of POSTs here is real load
+ *        on Billing::PayPalClient::verify_webhook_signature's own outbound
+ *        call to PayPal — worth the strict per-IP tier same as the rest).
  *
  * This is the auth/account/content subset of kDefaultPublicPathsCsv minus the
  * infra and static surface (`/`, `/healthz`, `/ready`, `/health`, `/metrics`,
@@ -67,7 +80,8 @@ inline constexpr const char* kDefaultProtectedPathsCsv =
     "/api/v1/account/reset-password/*,/api/v1/account/change-email/*,"
     "/api/v1/account/join-from-invite/*,"
     "/api/v1/public/posts,/api/v1/public/posts/*,"
-    "/posts/*,/sitemap.xml,/uploads/*";
+    "/posts/*,/sitemap.xml,/uploads/*,"
+    "/api/v1/billing/paypal/webhook";
 
 /**
  * @brief True if @p path is covered by @p public_paths — exact match, or a

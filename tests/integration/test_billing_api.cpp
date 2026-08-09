@@ -17,6 +17,7 @@
  *     is influenced by) any user-id-shaped parameter.
  */
 
+#include <map>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -70,6 +71,28 @@ public:
     std::int64_t last_create_amount_cents = 0;
     std::string last_create_currency;
     std::string last_captured_order_id;
+
+    // ── webhook signature verification (Task 5) ─────────────────────────
+    // true by default so a webhook test only has to override what it means
+    // to exercise. Task 3's report: verify_webhook_signature THROWS for
+    // "PayPal's own verify API was unreachable" and RETURNS false for
+    // "malformed input / PayPal said no" — verify_throw_message simulates
+    // the former, verify_signature_result=false the latter.
+    bool verify_signature_result = true;
+    std::optional<std::string> verify_throw_message;
+    int verify_webhook_signature_calls = 0;
+    std::map<std::string, std::string> last_verify_headers;
+    std::string last_verify_raw_body;
+
+    bool verify_webhook_signature(const std::map<std::string, std::string>& headers,
+                                  const std::string& raw_body) override {
+        ++verify_webhook_signature_calls;
+        last_verify_headers = headers;
+        last_verify_raw_body = raw_body;
+        if (verify_throw_message)
+            throw std::runtime_error(*verify_throw_message);
+        return verify_signature_result;
+    }
 
     Billing::PayPalOrder create_order(std::int64_t amount_cents,
                                       const std::string& currency,
@@ -191,6 +214,66 @@ protected:
         if (status)
             *status = resp->statusCode();
         return json::parse(std::string(resp->body()));
+    }
+
+    // ── webhook (Task 5) ─────────────────────────────────────────────────
+    // POST /api/v1/billing/paypal/webhook is public/unauthenticated — no
+    // principal is stamped on the request, mirroring the real PayPal caller.
+    // include_headers=false drops the paypal-* headers entirely (a distinct
+    // way verify_webhook_signature can legitimately return false, per
+    // Task 3's report — exercised implicitly by the fake here since the fake
+    // itself decides verified/unverified, but kept for shape-completeness).
+    json do_webhook(const json& event, int* status = nullptr, bool include_headers = true) {
+        auto req = TestHelpers::make_request(drogon::Post, event);
+        if (include_headers) {
+            req->addHeader("Paypal-Auth-Algo", "SHA256withRSA");
+            req->addHeader("Paypal-Cert-Url", "https://api.sandbox.paypal.com/cert");
+            req->addHeader("Paypal-Transmission-Id", "txn-" + event.value("id", std::string("none")));
+            req->addHeader("Paypal-Transmission-Sig", "sig");
+            req->addHeader("Paypal-Transmission-Time", "2026-01-01T00:00:00Z");
+        }
+        HttpResponsePtr resp;
+        controller.paypalWebhook(req, [&](const HttpResponsePtr& r) { resp = r; });
+        if (status)
+            *status = resp->statusCode();
+        return json::parse(std::string(resp->body()));
+    }
+
+    // Real PAYMENT.CAPTURE.COMPLETED shape: the order id lives at
+    // resource.supplementary_data.related_ids.order_id (BillingController::
+    // handleCaptureCompleted's own extraction path).
+    static json capture_completed_event(const std::string& event_id,
+                                        const std::string& order_id,
+                                        const std::string& capture_id,
+                                        const std::string& amount_value,
+                                        const std::string& currency = "USD") {
+        return json{{"id", event_id},
+                    {"event_type", "PAYMENT.CAPTURE.COMPLETED"},
+                    {"resource",
+                     {{"id", capture_id},
+                      {"status", "COMPLETED"},
+                      {"amount", {{"value", amount_value}, {"currency_code", currency}}},
+                      {"supplementary_data", {{"related_ids", {{"order_id", order_id}}}}}}}};
+    }
+
+    // Real PAYMENT.CAPTURE.REFUNDED shape: the refund resource carries no
+    // direct capture_id field — it's recovered from the "up" link, exactly
+    // as BillingController::extract_capture_id_from_links does.
+    static json capture_refunded_event(const std::string& event_id,
+                                       const std::string& refund_id,
+                                       const std::string& capture_id,
+                                       const std::string& amount_value,
+                                       const std::string& currency = "USD") {
+        return json{
+            {"id", event_id},
+            {"event_type", "PAYMENT.CAPTURE.REFUNDED"},
+            {"resource",
+             {{"id", refund_id},
+              {"status", "COMPLETED"},
+              {"amount", {{"value", amount_value}, {"currency_code", currency}}},
+              {"links",
+               json::array({{{"rel", "up"},
+                             {"href", "https://api.sandbox.paypal.com/v2/payments/captures/" + capture_id}}})}}}};
     }
 };
 
@@ -531,6 +614,251 @@ TEST_F(BillingApiTest, CaptureSurfacesGenericPayPalFailureAsInternalErrorWithNoP
     ASSERT_TRUE(payment.has_value());
     EXPECT_EQ(payment->status, "created");  // untouched — not failed, not captured
     EXPECT_FALSE(payment->provider_capture_id.has_value());
+}
+
+// ── paypal webhook ───────────────────────────────────────────────────────
+
+TEST_F(BillingApiTest, WebhookRejectsInvalidSignature) {
+    auto user = seed_user("webhook-badsig@example.com");
+    fake->next_order_id = "ORDER-BADSIG-1";
+    do_topup(user, json{{"amount_cents", 1000}});
+    fake->verify_signature_result = false;
+
+    int status = 0;
+    auto body = do_webhook(capture_completed_event("WH-BADSIG-1", "ORDER-BADSIG-1", "CAPTURE-BADSIG-1", "10.00"), &status);
+    EXPECT_EQ(status, k401Unauthorized);
+    EXPECT_EQ(body["error"], "invalid_signature");
+
+    EXPECT_EQ(Billing::balance_of(user.subject), 0);
+    EXPECT_EQ(Billing::history(user.subject, 10, 0).size(), 0u);
+    auto payment = payments.find_by_order_id("ORDER-BADSIG-1");
+    ASSERT_TRUE(payment.has_value());
+    EXPECT_FALSE(payment->provider_capture_id.has_value());
+}
+
+// verify_webhook_signature THROWS (not returns false) when PayPal's own
+// verify API is unreachable/non-2xx — Task 3's report is explicit this must
+// map to 5xx (PayPal retries later), never conflated with an actual bad
+// signature (401).
+TEST_F(BillingApiTest, WebhookVerificationApiUnreachableReturns5xx) {
+    auto user = seed_user("webhook-unreachable@example.com");
+    fake->next_order_id = "ORDER-UNREACHABLE-1";
+    do_topup(user, json{{"amount_cents", 1000}});
+    fake->verify_throw_message = "paypal: verify-webhook-signature failed with HTTP 503: service unavailable";
+
+    int status = 0;
+    auto body =
+        do_webhook(capture_completed_event("WH-UNREACHABLE-1", "ORDER-UNREACHABLE-1", "CAPTURE-UNREACHABLE-1", "10.00"),
+                  &status);
+    EXPECT_GE(status, 500);
+    EXPECT_LT(status, 600);
+    EXPECT_EQ(body["error"], "internal_error");
+
+    EXPECT_EQ(Billing::balance_of(user.subject), 0);
+    auto payment = payments.find_by_order_id("ORDER-UNREACHABLE-1");
+    ASSERT_TRUE(payment.has_value());
+    EXPECT_FALSE(payment->provider_capture_id.has_value());
+}
+
+// The core "crediting when the user never returned" scenario: no call to
+// POST .../capture ever happened for this order — the webhook alone credits.
+TEST_F(BillingApiTest, WebhookCreditsWhenUserNeverReturned) {
+    auto user = seed_user("webhook-neverreturned@example.com");
+    fake->next_order_id = "ORDER-NEVERRETURNED-1";
+    do_topup(user, json{{"amount_cents", 1000}});
+    // fake->capture_order is never invoked in this test — the return-flow
+    // capture endpoint is never called at all.
+
+    int status = 0;
+    auto body = do_webhook(
+        capture_completed_event("WH-NEVERRETURNED-1", "ORDER-NEVERRETURNED-1", "CAPTURE-NEVERRETURNED-1", "10.00"),
+        &status);
+    EXPECT_EQ(status, k200OK);
+    EXPECT_TRUE(body["data"]["handled"].get<bool>());
+
+    EXPECT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 1000);
+    EXPECT_EQ(Billing::history(user.subject, 10, 0, /*from_primary=*/true).size(), 1u);
+    auto payment = payments.find_by_order_id("ORDER-NEVERRETURNED-1", /*from_primary=*/true);
+    ASSERT_TRUE(payment.has_value());
+    EXPECT_EQ(payment->status, "captured");
+    ASSERT_TRUE(payment->provider_capture_id.has_value());
+    EXPECT_EQ(*payment->provider_capture_id, "CAPTURE-NEVERRETURNED-1");
+}
+
+// The return flow already credited this order (fake->next_capture_id is the
+// capture id BillingController::capture recorded) — the webhook redelivering
+// (or independently reporting) the same completed capture must be a true
+// no-op: exactly one ledger row, unchanged balance.
+TEST_F(BillingApiTest, WebhookAfterCaptureIsNoop) {
+    auto user = seed_user("webhook-afterreturn@example.com");
+    fake->next_order_id = "ORDER-AFTERRETURN-1";
+    do_topup(user, json{{"amount_cents", 1000}});
+    fake->capture_amount_cents = 1000;
+    fake->capture_currency = "USD";
+    int capture_status = 0;
+    do_capture(user, "ORDER-AFTERRETURN-1", &capture_status);
+    ASSERT_EQ(capture_status, k200OK);
+    ASSERT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 1000);
+
+    int status = 0;
+    auto body = do_webhook(
+        capture_completed_event(
+            "WH-AFTERRETURN-1", "ORDER-AFTERRETURN-1", fake->next_capture_id /* same capture id */, "10.00"),
+        &status);
+    EXPECT_EQ(status, k200OK);
+    EXPECT_TRUE(body["data"]["handled"].get<bool>());
+
+    EXPECT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 1000);
+    EXPECT_EQ(Billing::history(user.subject, 10, 0, /*from_primary=*/true).size(), 1u);  // exactly one ledger row
+}
+
+// A capture that was PENDING when the user hit the return-flow /capture
+// endpoint (BillingController::capture leaves provider_capture_id NULL for
+// that) later resolves via this webhook. Redelivering the SAME webhook a
+// second time must not credit twice.
+TEST_F(BillingApiTest, WebhookResolvesPendingCaptureExactlyOnce) {
+    auto user = seed_user("webhook-pending@example.com");
+    fake->next_order_id = "ORDER-PENDING-WH-1";
+    do_topup(user, json{{"amount_cents", 1000}});
+    fake->capture_amount_cents = 1000;
+    fake->capture_currency = "USD";
+    fake->capture_status = "PENDING";
+    int pending_status = 0;
+    auto pending_body = do_capture(user, "ORDER-PENDING-WH-1", &pending_status);
+    ASSERT_EQ(pending_status, k200OK);
+    ASSERT_FALSE(pending_body["data"]["credited"].get<bool>());
+    ASSERT_EQ(Billing::balance_of(user.subject), 0);
+    auto pending_payment = payments.find_by_order_id("ORDER-PENDING-WH-1");
+    ASSERT_TRUE(pending_payment.has_value());
+    ASSERT_FALSE(pending_payment->provider_capture_id.has_value());
+
+    auto event = capture_completed_event(
+        "WH-PENDING-RESOLVED-1", "ORDER-PENDING-WH-1", fake->next_capture_id /* PayPal's real capture id */, "10.00");
+
+    int first_status = 0;
+    auto first_body = do_webhook(event, &first_status);
+    EXPECT_EQ(first_status, k200OK);
+    EXPECT_TRUE(first_body["data"]["handled"].get<bool>());
+    EXPECT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 1000);
+    EXPECT_EQ(Billing::history(user.subject, 10, 0, /*from_primary=*/true).size(), 1u);
+
+    // Redelivery of the exact same event — credit_capture's guarded UPDATE
+    // (WHERE provider_capture_id IS NULL) makes this a no-op.
+    int second_status = 0;
+    auto second_body = do_webhook(event, &second_status);
+    EXPECT_EQ(second_status, k200OK);
+    EXPECT_TRUE(second_body["data"]["handled"].get<bool>());
+    EXPECT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 1000);  // unchanged
+    EXPECT_EQ(Billing::history(user.subject, 10, 0, /*from_primary=*/true).size(), 1u);  // still exactly one row
+}
+
+TEST_F(BillingApiTest, WebhookRefundWritesNegativeEntry) {
+    auto user = seed_user("webhook-refund@example.com");
+    fake->next_order_id = "ORDER-REFUND-WH-1";
+    do_topup(user, json{{"amount_cents", 1000}});
+    fake->capture_amount_cents = 1000;
+    fake->capture_currency = "USD";
+    int capture_status = 0;
+    do_capture(user, "ORDER-REFUND-WH-1", &capture_status);
+    ASSERT_EQ(capture_status, k200OK);
+    ASSERT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 1000);
+
+    int status = 0;
+    auto body = do_webhook(
+        capture_refunded_event("WH-REFUND-1", "REFUND-WH-1", fake->next_capture_id, "10.00"), &status);
+    EXPECT_EQ(status, k200OK);
+    EXPECT_TRUE(body["data"]["handled"].get<bool>());
+
+    EXPECT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 0);
+    auto hist = Billing::history(user.subject, 10, 0, /*from_primary=*/true);
+    ASSERT_EQ(hist.size(), 2u);  // topup + refund
+    const auto& refund_entry = hist[0];  // newest first
+    EXPECT_EQ(refund_entry.kind, "refund");
+    EXPECT_EQ(refund_entry.delta_credits, -1000);
+    EXPECT_EQ(refund_entry.reference, "REFUND-WH-1");  // PayPal's refund id is the idempotency marker
+
+    auto payment = payments.find_by_order_id("ORDER-REFUND-WH-1", /*from_primary=*/true);
+    ASSERT_TRUE(payment.has_value());
+    EXPECT_EQ(payment->status, "refunded");
+}
+
+TEST_F(BillingApiTest, WebhookDuplicateRefundEventIsNoop) {
+    auto user = seed_user("webhook-refund-dup@example.com");
+    fake->next_order_id = "ORDER-REFUND-DUP-1";
+    do_topup(user, json{{"amount_cents", 1000}});
+    fake->capture_amount_cents = 1000;
+    fake->capture_currency = "USD";
+    do_capture(user, "ORDER-REFUND-DUP-1");
+    ASSERT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 1000);
+
+    auto event = capture_refunded_event("WH-REFUND-DUP-1", "REFUND-DUP-1", fake->next_capture_id, "10.00");
+
+    int first_status = 0;
+    do_webhook(event, &first_status);
+    ASSERT_EQ(first_status, k200OK);
+    ASSERT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 0);
+    ASSERT_EQ(Billing::history(user.subject, 10, 0, /*from_primary=*/true).size(), 2u);
+
+    // Redelivery of the exact same refund event (same PayPal refund id) —
+    // Billing::refund_capture's durable billing_refunds marker makes this a
+    // no-op: no second negative ledger row, balance unchanged.
+    int second_status = 0;
+    auto second_body = do_webhook(event, &second_status);
+    EXPECT_EQ(second_status, k200OK);
+    EXPECT_TRUE(second_body["data"]["handled"].get<bool>());
+    EXPECT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 0);
+    EXPECT_EQ(Billing::history(user.subject, 10, 0, /*from_primary=*/true).size(), 2u);  // still just topup + refund
+}
+
+TEST_F(BillingApiTest, WebhookIgnoresUnrelatedEventTypes) {
+    auto user = seed_user("webhook-unrelated@example.com");
+    fake->next_order_id = "ORDER-UNRELATED-1";
+    do_topup(user, json{{"amount_cents", 1000}});
+
+    json event = {{"id", "WH-UNRELATED-1"}, {"event_type", "CHECKOUT.ORDER.APPROVED"}, {"resource", json::object()}};
+    int status = 0;
+    auto body = do_webhook(event, &status);
+    EXPECT_EQ(status, k200OK);
+    EXPECT_FALSE(body["data"]["handled"].get<bool>());
+
+    EXPECT_EQ(Billing::balance_of(user.subject), 0);
+    EXPECT_EQ(Billing::history(user.subject, 10, 0).size(), 0u);
+    auto payment = payments.find_by_order_id("ORDER-UNRELATED-1");
+    ASSERT_TRUE(payment.has_value());
+    EXPECT_FALSE(payment->provider_capture_id.has_value());
+}
+
+// KNOWN GAP (see BillingController::handleCaptureReversed): a reversal event
+// still acks 200 (nothing to retry into existing) but must NOT touch the
+// wallet or the original refund's billing_refunds row — there's no code
+// path here that could even if it tried, this just pins that down.
+TEST_F(BillingApiTest, WebhookReversalEventIsAcknowledgedButNotApplied) {
+    auto user = seed_user("webhook-reversed@example.com");
+    fake->next_order_id = "ORDER-REVERSED-1";
+    do_topup(user, json{{"amount_cents", 1000}});
+    fake->capture_amount_cents = 1000;
+    fake->capture_currency = "USD";
+    do_capture(user, "ORDER-REVERSED-1");
+    do_webhook(capture_refunded_event("WH-REVERSED-REFUND-1", "REFUND-REVERSED-1", fake->next_capture_id, "10.00"));
+    ASSERT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), 0);
+    auto balance_before = Billing::balance_of(user.subject, /*from_primary=*/true);
+    auto hist_before = Billing::history(user.subject, 10, 0, /*from_primary=*/true).size();
+
+    json reversal = {{"id", "WH-REVERSED-1"},
+                     {"event_type", "PAYMENT.CAPTURE.REVERSED"},
+                     {"resource",
+                      {{"id", "REFUND-REVERSED-1"},
+                       {"links",
+                        json::array({{{"rel", "up"},
+                                      {"href", "https://api.sandbox.paypal.com/v2/payments/captures/" +
+                                                   fake->next_capture_id}}})}}}};
+    int status = 0;
+    auto body = do_webhook(reversal, &status);
+    EXPECT_EQ(status, k200OK);
+    EXPECT_FALSE(body["data"]["handled"].get<bool>());
+
+    EXPECT_EQ(Billing::balance_of(user.subject, /*from_primary=*/true), balance_before);
+    EXPECT_EQ(Billing::history(user.subject, 10, 0, /*from_primary=*/true).size(), hist_before);
 }
 
 // ── wallet ───────────────────────────────────────────────────────────────

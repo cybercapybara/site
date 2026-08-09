@@ -351,6 +351,22 @@ components:
               type: boolean
               description: Present (true) only when PayPal's capture has not reached COMPLETED yet — the payment is left uncaptured for the webhook to resolve.
 
+    # POST /api/v1/billing/paypal/webhook. `handled` distinguishes "this event
+    # type applies real ledger logic" (PAYMENT.CAPTURE.COMPLETED/REFUNDED)
+    # from "acknowledged but deliberately not acted on" (an unrelated event
+    # type, or PAYMENT.CAPTURE.REVERSED — see BillingController::
+    # handleCaptureReversed's KNOWN GAP doc comment) — both answer 200 either
+    # way, since PayPal retries any non-2xx for days.
+    WebhookAckResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [handled]
+          properties:
+            handled: { type: boolean, description: "true if this event type drives real crediting/refund logic (whether or not it was a no-op replay); false for an ignored/unrecognized event type" }
+
 # -----------------------------------------------------------------------------
 paths:
   /:
@@ -1321,3 +1337,42 @@ paths:
         '401': { description: Not authenticated }
         '404': { description: "Billing module disabled, or no such order for this caller" }
         '409': { description: "This payment is failed/refunded and cannot be captured (payment_not_capturable), or PayPal reports the order hasn't been approved yet (order_not_approved)" }
+  /api/v1/billing/paypal/webhook:
+    post:
+      summary: PayPal webhook — capture/refund notifications
+      description: >
+        PayPal-to-server only, not a browser request: public (no session) and
+        CSRF-exempt (PayPal never presents the session cookie the CSRF check
+        keys off), but every request is verified against PayPal's own
+        verify-webhook-signature API BEFORE the body is trusted, using the
+        paypal-auth-algo / paypal-cert-url / paypal-transmission-id /
+        paypal-transmission-sig / paypal-transmission-time headers PayPal
+        sends. Response codes intentionally do NOT follow the usual REST
+        mapping — PayPal retries any non-2xx delivery for days:
+          * PAYMENT.CAPTURE.COMPLETED credits the wallet (idempotent — a
+            capture already credited via POST .../capture, including one
+            that resolves a PENDING return-flow capture, is a 200 no-op).
+          * PAYMENT.CAPTURE.REFUNDED refunds via the same logic as
+            Billing::refund_capture, keyed on PayPal's own refund id as the
+            idempotency marker.
+          * Any other event type (including PAYMENT.CAPTURE.REVERSED — a
+            known gap, see BillingController::handleCaptureReversed) is
+            acknowledged with 200 and NOT acted on.
+        200 is returned for every signature-valid event, handled or not.
+      tags: [billing]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: PayPal webhook event envelope (id, event_type, resource, ...) — verbatim as PayPal sends it.
+      responses:
+        '200':
+          description: Signature verified — event handled or deliberately acknowledged-not-acted-on (see WebhookAckResponse.data.handled)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WebhookAckResponse' }
+        '401': { description: "Signature verification failed (malformed body, missing paypal-* headers, or PayPal reported the signature invalid) — nothing credited/refunded" }
+        '404': { description: Billing module disabled }
+        '500': { description: "PayPal's own verify-webhook-signature API was unreachable or answered non-2xx — retry later" }
