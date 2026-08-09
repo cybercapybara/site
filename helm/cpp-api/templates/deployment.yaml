@@ -307,6 +307,13 @@ spec:
                   name: {{ include "cpp-api.fullname" . }}
                   key: mail-smtp-password
             {{- end }}
+            {{- if .Values.storage.s3.secretKey }}
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cpp-api.fullname" . }}
+                  key: s3-secret-key
+            {{- end }}
             - name: MAIL_SMTP_USE_TLS
               value: {{ .Values.mail.smtpUseTls | quote }}
             - name: MAIL_FROM

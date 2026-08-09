@@ -242,6 +242,22 @@ TEST(HttpE2E, NonJsonContentTypeRejectedWith415) {
     EXPECT_EQ(resp->statusCode(), k415UnsupportedMediaType);
 }
 
+TEST(HttpE2E, MultipartPassesContentTypeGate) {
+    // Uploads are multipart/form-data — the JSON content-type gate must let
+    // them through to the auth/controller layers. An anonymous multipart POST
+    // to the admin upload route therefore dies at AUTH (401), not at the gate
+    // (415). Regression: the gate once 415'd every upload before the
+    // controller's own validation ever ran.
+    REQUIRE_E2E_ENV();
+    auto req = HttpRequest::newHttpRequest();
+    req->setMethod(Post);
+    req->setPath("/api/v1/admin/uploads");
+    req->setBody("--x\r\nContent-Disposition: form-data; name=\"file\"\r\n\r\nhi\r\n--x--\r\n");
+    req->setContentTypeString("multipart/form-data; boundary=x");
+    auto resp = send(req);
+    EXPECT_EQ(resp->statusCode(), k401Unauthorized) << resp->getBody();
+}
+
 TEST(HttpE2E, AuthMiddlewareGuardsNonPublicPaths) {
     REQUIRE_E2E_ENV();
     auto req = HttpRequest::newHttpRequest();

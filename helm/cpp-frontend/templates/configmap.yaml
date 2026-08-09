@@ -33,6 +33,10 @@ data:
         }
 
         location /api/ {
+            # Media uploads accept up to 5 MB (UploadController cap); the nginx
+            # default is 1m, which 413s a normal photo before it reaches the
+            # backend. 6m leaves headroom for multipart overhead.
+            client_max_body_size 6m;
             proxy_pass http://{{ .Values.backend.service }}:{{ .Values.backend.port }};
             proxy_set_header Host              $host;
             # Pass through the X-Real-IP the ingress set (the REAL client) — NOT
@@ -42,6 +46,35 @@ data:
             # omits it, so the backend falls back to X-Forwarded-For / peer.
             proxy_set_header X-Real-IP         $http_x_real_ip;
             proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_http_version 1.1;
+            proxy_read_timeout 30s;
+            proxy_connect_timeout 5s;
+        }
+
+        # Content module (content.enabled): markdown posts, sitemap and uploads
+        # are backend routes, not SPA routes — proxy them like /api/. With the
+        # module off the backend answers 404. KEEP IN SYNC with
+        # frontend/nginx.conf (the dev/compose copy of this config).
+        location = /sitemap.xml {
+            proxy_pass http://{{ .Values.backend.service }}:{{ .Values.backend.port }};
+            proxy_set_header Host              $host;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_http_version 1.1;
+        }
+        location ^~ /posts/ {
+            proxy_pass http://{{ .Values.backend.service }}:{{ .Values.backend.port }};
+            proxy_set_header Host              $host;
+            proxy_set_header X-Real-IP         $http_x_real_ip;
+            proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_http_version 1.1;
+            proxy_read_timeout 30s;
+            proxy_connect_timeout 5s;
+        }
+        location ^~ /uploads/ {
+            proxy_pass http://{{ .Values.backend.service }}:{{ .Values.backend.port }};
+            proxy_set_header Host              $host;
             proxy_set_header X-Forwarded-Proto $scheme;
             proxy_http_version 1.1;
             proxy_read_timeout 30s;
