@@ -326,7 +326,14 @@ inline CreditResult credit_capture(const std::string& provider_order_id,
  * (migrations/008_billing_refunds.sql), written on EVERY non-duplicate call,
  * whatever the outcome:
  *
- *   1. Look up the payment by @p provider_capture_id.
+ *   1. Look up the payment by @p provider_capture_id — `FOR UPDATE`. This is
+ *      what makes the aggregate check in step 3 race-safe: TWO concurrent
+ *      refunds against the SAME payment (distinct refund ids, e.g. 600 and
+ *      500 on a 1000-cent payment) now serialize on this row instead of
+ *      both reading `already_refunded=0` and both passing. It also gives
+ *      this function the same lock ORDER as credit_capture — payments
+ *      first, wallet_balances second (see step 4) — so the two functions
+ *      can never deadlock against each other over the same payment/user.
  *   2. Idempotency FIRST: if `billing_refunds` already has a row for
  *      @p provider_refund_id, this is a redelivery — return the existing
  *      state, write nothing. This is checked BEFORE the amount validation
@@ -340,34 +347,46 @@ inline CreditResult credit_capture(const std::string& provider_order_id,
  *      `<= payments.amount_cents`, AND the running total of every
  *      `billing_refunds` row for this payment (applied or skipped — PayPal's
  *      own count of what it refunded, not just what the wallet could
- *      reflect) plus this one must not exceed `payments.amount_cents`.
- *      Either violation throws InvalidRefundAmount; the whole transaction
- *      rolls back, nothing is written — not even a `billing_refunds` row,
- *      since this refund was never a real attempt against this payment.
+ *      reflect) plus this one must not exceed `payments.amount_cents`. The
+ *      payments row lock from step 1 makes this sum trustworthy even under
+ *      concurrent refund attempts. Either violation throws
+ *      InvalidRefundAmount; the whole transaction rolls back, nothing is
+ *      written — not even a `billing_refunds` row, since this refund was
+ *      never a real attempt against this payment.
  *   4. Convert to credits (`refunded_amount_cents * rate_snapshot / 100`,
- *      integer division). Two ways this can fail to apply, NEITHER of which
- *      may ever let the wallet_entries/wallet_balances CHECK constraints
- *      fire (that's what silently 500'd before):
+ *      integer division). `SELECT credits FROM wallet_balances ... FOR
+ *      UPDATE` locks the user's balance row ONCE, up front, whatever the
+ *      outcome — its value seeds the response in every branch below, and is
+ *      also the sufficiency-decision input, so there is exactly one query
+ *      here rather than a second one only some branches need. Two ways the
+ *      credit application can be skipped, NEITHER of which may ever let the
+ *      wallet_entries/wallet_balances CHECK constraints fire (that's what
+ *      silently 500'd before):
  *        - `refund_credits == 0`: the amount is too small to represent at
  *          this payment's rate (e.g. rate 10, refund of 1-9 cents). The
  *          `wallet_entries.delta_credits <> 0` CHECK would otherwise reject
  *          the insert outright. Outcome: `skipped_zero_credits`.
- *        - `SELECT credits FROM wallet_balances ... FOR UPDATE` locks the
- *          user's row and the sufficiency check
- *          (`current_balance - refund_credits >= 0`) happens in C++ BEFORE
+ *        - the locked balance can't cover it
+ *          (`current_balance - refund_credits < 0`), decided in C++ BEFORE
  *          any write, so `wallet_balances.CHECK (credits >= 0)` is never
- *          actually exercised either. Outcome: `skipped_insufficient`.
+ *          actually exercised. Outcome: `skipped_insufficient`.
  *      Either way: log at `error` for manual reconciliation, write the
  *      `billing_refunds` row with that outcome and `credits_deducted = 0`,
  *      skip the ledger insert entirely. Otherwise: ledger insert + balance
  *      upsert, outcome `applied`, `credits_deducted = refund_credits`.
- *   5. `payments.status` becomes `refunded` ONLY when this refund is FULL
- *      (`refunded_amount_cents == payments.amount_cents`) and the payment is
- *      currently `captured` — this fires regardless of the outcome above
- *      (a full refund is a PayPal-side fact independent of whether the
- *      wallet could reflect it), but a PARTIAL refund never touches
- *      `payments.status`, and a refund against a payment that isn't
- *      `captured` (e.g. `failed`) can't accidentally flip it either.
+ *   5. `payments.status` becomes `refunded` when the CUMULATIVE total of
+ *      every refund against this payment (steps 3's running total,
+ *      including this one) reaches `payments.amount_cents` AND the payment
+ *      is currently `captured` — so a payment fully refunded across several
+ *      partials (e.g. 400 then 600 on a 1000-cent payment) DOES end up
+ *      `refunded` once the last one lands, not just a single call whose own
+ *      amount happens to equal the full total. This fires regardless of the
+ *      ledger outcome above (a full-by-now refund is a PayPal-side fact
+ *      independent of whether the wallet could reflect every part of it),
+ *      but a refund that leaves the cumulative total short of the full
+ *      amount never touches `payments.status`, and a refund against a
+ *      payment that isn't `captured` (e.g. `failed`) can't accidentally
+ *      flip it either.
  *
  * All of the above commits atomically in this one transaction.
  *
@@ -375,6 +394,17 @@ inline CreditResult credit_capture(const std::string& provider_order_id,
  * other) loses on `billing_refunds.provider_refund_id`'s UNIQUE constraint
  * (SQLSTATE 23505) — caught below and reported as the now-idempotent
  * existing state instead of a raw 500.
+ *
+ * KNOWN GAP (flagged for Task 5, not fixed here — no PayPal client exists
+ * yet to reverse anything): a refund that PayPal later reverses/voids has
+ * no representation in this schema. The `billing_refunds` row from the
+ * original refund event would stay in place, permanently counting toward
+ * the aggregate total in step 3 — a legitimate LATER refund on the same
+ * payment could then be wrongly refused as "cumulative total exceeds
+ * amount_cents" even though the voided refund never actually took money out
+ * a second time. Task 5's webhook handler should account for this (e.g. a
+ * `REFUND.REVERSED` event needs its own handling here, not just a bigger
+ * refund) before it's reachable in production.
  *
  * @throws Repositories::PaymentNotFound if @p provider_capture_id is unknown.
  * @throws InvalidRefundAmount if @p refunded_amount_cents is out of range,
@@ -384,8 +414,12 @@ inline CreditResult refund_capture(const std::string& provider_capture_id,
                                    const std::string& provider_refund_id,
                                    std::int64_t refunded_amount_cents) {
     auto attempt = [&](auto& txn) -> CreditResult {
+        // FOR UPDATE: see step 1 above — this is what makes the aggregate
+        // check below race-safe against a concurrent refund on the same
+        // payment, and fixes this function's lock order to match
+        // credit_capture's (payments, then wallet_balances).
         auto pr = txn.exec_params(
-            "SELECT id, user_id, amount_cents, rate_snapshot FROM payments WHERE provider_capture_id = $1",
+            "SELECT id, user_id, amount_cents, rate_snapshot FROM payments WHERE provider_capture_id = $1 FOR UPDATE",
             provider_capture_id);
         if (pr.empty())
             throw Repositories::PaymentNotFound{};
@@ -413,10 +447,14 @@ inline CreditResult refund_capture(const std::string& provider_capture_id,
             throw InvalidRefundAmount{};
         }
 
+        // Trustworthy under concurrency because the payments row is already
+        // locked (step 1) — a second concurrent refund on this same payment
+        // blocked there until this transaction commits or rolls back.
         auto sum_row = txn.exec_params(
             "SELECT COALESCE(SUM(amount_cents), 0) AS total FROM billing_refunds WHERE payment_id = $1", payment_id);
         const std::int64_t already_refunded = sum_row[0]["total"].template as<std::int64_t>();
-        if (already_refunded + refunded_amount_cents > amount_cents) {
+        const std::int64_t cumulative_total = already_refunded + refunded_amount_cents;
+        if (cumulative_total > amount_cents) {
             spdlog::error(
                 "billing: refund {} for payment {} would push cumulative refunds past the payment amount: "
                 "already_refunded={} this_refund={} payment_amount={} — refused, nothing written",
@@ -433,9 +471,15 @@ inline CreditResult refund_capture(const std::string& provider_capture_id,
         // exactly payments.credits_expected, when it's nonzero.
         const std::int64_t refund_credits = (refunded_amount_cents * rate_snapshot) / 100;
 
+        // Lock the balance row ONCE, up front, whatever the outcome turns
+        // out to be — its value seeds the response in all three branches
+        // below and is the sufficiency-decision input in one of them, so
+        // there's no second (and, on the zero-credit path, wasted) query.
+        auto br = txn.exec_params("SELECT credits FROM wallet_balances WHERE user_id = $1 FOR UPDATE", user_id);
+        std::int64_t new_balance = br.empty() ? 0 : br[0]["credits"].template as<std::int64_t>();
+
         std::string outcome;
         std::int64_t credits_deducted = 0;
-        std::int64_t new_balance = detail::read_balance(txn, user_id);
 
         if (refund_credits == 0) {
             // Too small to represent at this rate — inserting delta_credits=0
@@ -451,44 +495,31 @@ inline CreditResult refund_capture(const std::string& provider_capture_id,
                 payment_id,
                 rate_snapshot,
                 refunded_amount_cents);
+        } else if (new_balance - refund_credits < 0) {
+            outcome = "skipped_insufficient";
+            spdlog::error(
+                "billing: refund {} for payment {} user {} needs {} credits but only {} are available — "
+                "recorded, wallet NOT debited; manual reconciliation required",
+                provider_refund_id,
+                payment_id,
+                user_id,
+                refund_credits,
+                new_balance);
         } else {
-            // Lock the balance row so the sufficiency check below can't race
-            // a concurrent write — decide BEFORE touching wallet_entries, so
-            // the CHECK (credits >= 0) is never actually exercised.
-            auto br = txn.exec_params("SELECT credits FROM wallet_balances WHERE user_id = $1 FOR UPDATE", user_id);
-            const std::int64_t current_balance = br.empty() ? 0 : br[0]["credits"].template as<std::int64_t>();
-            // Re-point new_balance at this LOCKED read: the earlier
-            // unlocked read at the top of the function could already be
-            // stale by the time we get here (a concurrent write for the
-            // same user could commit in between, within this same
-            // transaction's READ COMMITTED snapshots).
-            new_balance = current_balance;
-            if (current_balance - refund_credits < 0) {
-                outcome = "skipped_insufficient";
-                spdlog::error(
-                    "billing: refund {} for payment {} user {} needs {} credits but only {} are available — "
-                    "recorded, wallet NOT debited; manual reconciliation required",
-                    provider_refund_id,
-                    payment_id,
-                    user_id,
-                    refund_credits,
-                    current_balance);
-            } else {
-                txn.exec_params(
-                    "INSERT INTO wallet_entries (user_id, delta_credits, kind, reference) VALUES ($1, $2, 'refund', $3)",
-                    user_id,
-                    -refund_credits,
-                    provider_refund_id);
-                auto upserted = txn.exec_params(
-                    "INSERT INTO wallet_balances (user_id, credits) VALUES ($1, $2) "
-                    "ON CONFLICT (user_id) DO UPDATE SET credits = wallet_balances.credits + EXCLUDED.credits, "
-                    "updated_at = now() RETURNING credits",
-                    user_id,
-                    -refund_credits);
-                new_balance = upserted[0]["credits"].template as<std::int64_t>();
-                outcome = "applied";
-                credits_deducted = refund_credits;
-            }
+            txn.exec_params(
+                "INSERT INTO wallet_entries (user_id, delta_credits, kind, reference) VALUES ($1, $2, 'refund', $3)",
+                user_id,
+                -refund_credits,
+                provider_refund_id);
+            auto upserted = txn.exec_params(
+                "INSERT INTO wallet_balances (user_id, credits) VALUES ($1, $2) "
+                "ON CONFLICT (user_id) DO UPDATE SET credits = wallet_balances.credits + EXCLUDED.credits, "
+                "updated_at = now() RETURNING credits",
+                user_id,
+                -refund_credits);
+            new_balance = upserted[0]["credits"].template as<std::int64_t>();
+            outcome = "applied";
+            credits_deducted = refund_credits;
         }
 
         // The durable marker — written for every outcome, so a redelivery of
@@ -503,15 +534,17 @@ inline CreditResult refund_capture(const std::string& provider_capture_id,
             credits_deducted,
             outcome);
 
-        // Full refund of a currently-captured payment flips status —
-        // regardless of whether the wallet could be debited (the money left
-        // PayPal either way). A partial refund, or a refund against a
-        // payment that isn't 'captured' (e.g. 'failed'), leaves status
-        // untouched (0 rows affected below is not an error).
+        // The CUMULATIVE total (not just this call's amount) reaching the
+        // full payment amount flips a currently-captured payment to
+        // refunded — regardless of whether the wallet could be debited (the
+        // money left PayPal either way). A cumulative total still short of
+        // the full amount, or a payment that isn't 'captured' (e.g.
+        // 'failed'), leaves status untouched (0 rows affected below is not
+        // an error).
         txn.exec_params(
-            "UPDATE payments SET status = 'refunded' WHERE id = $1 AND status = 'captured' AND amount_cents = $2",
+            "UPDATE payments SET status = 'refunded' WHERE id = $1 AND status = 'captured' AND $2 >= amount_cents",
             payment_id,
-            refunded_amount_cents);
+            cumulative_total);
 
         // credited=true past this point unconditionally: this call durably
         // recorded a NEW billing_refunds row either way — see the file-level

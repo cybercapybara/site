@@ -255,6 +255,12 @@ TEST_F(WalletTest, DistinctPartialRefundsBothApply) {
     EXPECT_TRUE(first_partial.credited);
     EXPECT_EQ(first_partial.balance, 600);
 
+    // NEW-B: the cumulative total (400 so far) is still short of the full
+    // 1000, so the payment stays 'captured' after just the first partial.
+    auto after_first = payments.find_by_capture_id("CAPTURE-4B");
+    ASSERT_TRUE(after_first.has_value());
+    EXPECT_EQ(after_first->status, "captured");
+
     auto second_partial = Billing::refund_capture("CAPTURE-4B", "REFUND-4B-2", 600);
     EXPECT_TRUE(second_partial.credited);
     EXPECT_EQ(second_partial.balance, 0);
@@ -268,13 +274,13 @@ TEST_F(WalletTest, DistinctPartialRefundsBothApply) {
             ++refund_rows;
     EXPECT_EQ(refund_rows, 2);
 
-    // NEW-4 scope note: status only flips on a SINGLE call whose amount
-    // equals the full payment amount — two partials that sum to the full
-    // amount do not (neither individual call is itself "full"). The payment
-    // stays 'captured' even though it is fully refunded in aggregate.
+    // NEW-B: status flips on the CUMULATIVE total reaching the full amount —
+    // 400 + 600 == 1000, so once the second (distinct) partial lands, the
+    // payment is 'refunded' even though neither individual call's own
+    // amount equaled the full 1000.
     auto found = payments.find_by_capture_id("CAPTURE-4B");
     ASSERT_TRUE(found.has_value());
-    EXPECT_EQ(found->status, "captured");
+    EXPECT_EQ(found->status, "refunded");
 
     // Redelivering the FIRST partial refund's id again is still a no-op —
     // per-id idempotency, not a payments.status guard.
