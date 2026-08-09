@@ -251,15 +251,25 @@ components:
         created_at:   { type: string }
         updated_at:   { type: string }
 
+    # GET /api/v1/billing/packages also surfaces the current per-unit rate and
+    # the custom-amount bounds — Task 8's custom-amount input validates
+    # against these client-side, and a package's own price/credits ratio can
+    # legitimately differ from the generic rate (a bonus/discount package),
+    # so they aren't derivable from the package list alone.
     BillingPackageListResponse:
       type: object
-      required: [data]
+      required: [data, credits_per_unit, min_amount_cents, max_amount_cents]
       properties:
         data:
           type: array
           items: { $ref: '#/components/schemas/BillingPackage' }
+        credits_per_unit: { type: integer, format: int64, description: "billing.credits_per_unit — credits per 100 cents" }
+        min_amount_cents: { type: integer, format: int64, description: Minimum accepted amount_cents for a custom top-up }
+        max_amount_cents: { type: integer, format: int64, description: Maximum accepted amount_cents for a custom top-up }
 
-    # Mirrors Domain::to_json(WalletEntry) in src/domain/Billing.hpp.
+    # Mirrors Domain::to_json(WalletEntry) in src/domain/Billing.hpp — the
+    # full internal/admin shape, INCLUDING created_by. Not used by the
+    # user-facing GET /api/v1/billing/wallet response — see PublicWalletEntry.
     WalletEntry:
       type: object
       required: [id, user_id, delta_credits, kind, reference, note, created_at]
@@ -271,6 +281,22 @@ components:
         reference:     { type: string }
         note:          { type: string }
         created_by:    { type: ['string', 'null'], format: uuid }
+        created_at:    { type: string }
+
+    # GET /api/v1/billing/wallet's ledger rows. Deliberately OMITS
+    # created_by (an admin's raw UUID on adjustment rows) — that's
+    # internal/admin-only information, not something an end user's own
+    # wallet view should ever leak. See BillingController::public_wallet_entry.
+    PublicWalletEntry:
+      type: object
+      required: [id, user_id, delta_credits, kind, reference, note, created_at]
+      properties:
+        id:            { type: string, format: uuid }
+        user_id:       { type: string, format: uuid }
+        delta_credits: { type: integer, format: int64 }
+        kind:          { type: string, enum: [topup, spend, adjustment, refund] }
+        reference:     { type: string }
+        note:          { type: string }
         created_at:    { type: string }
 
     # GET /api/v1/billing/wallet. Mirrors BillingController::getWallet.
@@ -285,7 +311,7 @@ components:
             balance: { type: integer, format: int64 }
             history:
               type: array
-              items: { $ref: '#/components/schemas/WalletEntry' }
+              items: { $ref: '#/components/schemas/PublicWalletEntry' }
         limit:  { type: integer }
         offset: { type: integer }
 
@@ -309,10 +335,21 @@ components:
       properties:
         data:
           type: object
-          required: [credited, balance]
+          required: [credited, balance, status]
           properties:
-            credited: { type: boolean, description: "false on an idempotent replay of an already-captured order" }
-            balance:  { type: integer, format: int64, description: Wallet balance AFTER this call }
+            credited: { type: boolean, description: "false on an idempotent replay, or when PayPal has not yet COMPLETED the capture" }
+            balance:  { type: integer, format: int64, description: Wallet balance AFTER this call (unchanged if not credited) }
+            status:
+              type: string
+              description: >
+                "captured" once this or an earlier call credited the wallet;
+                otherwise PayPal's own capture status verbatim (e.g.
+                "PENDING", "DECLINED") — PayPal answers 2xx for both, so this
+                is how a caller tells a settled capture from one still in
+                flight.
+            pending:
+              type: boolean
+              description: Present (true) only when PayPal's capture has not reached COMPLETED yet — the payment is left uncaptured for the webhook to resolve.
 
 # -----------------------------------------------------------------------------
 paths:
@@ -1183,11 +1220,15 @@ paths:
   /api/v1/billing/packages:
     get:
       summary: List active top-up packages
+      description: >
+        Also returns the current per-unit rate (credits_per_unit) and the
+        custom-amount bounds (min_amount_cents/max_amount_cents) alongside
+        the package list — see BillingPackageListResponse.
       tags: [billing]
       security: [{ BearerAuth: [] }]
       responses:
         '200':
-          description: Active packages, catalogue order
+          description: Active packages (catalogue order) + the current rate/bounds
           content:
             application/json:
               schema: { $ref: '#/components/schemas/BillingPackageListResponse' }
@@ -1219,8 +1260,9 @@ paths:
         Provide exactly one of package_id or amount_cents. Credits are always
         computed server-side (package.credits, or amount_cents *
         billing.credits_per_unit / 100) — any "credits" field in the body is
-        ignored entirely. amount_cents (custom top-ups only) is bounded by
-        billing.min_amount_cents / billing.max_amount_cents.
+        ignored entirely. The resulting amount_cents (a custom amount, OR a
+        package's own price) is bounded by billing.min_amount_cents /
+        billing.max_amount_cents in both cases.
       tags: [billing]
       security: [{ BearerAuth: [] }]
       requestBody:
@@ -1238,7 +1280,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/TopupResponse' }
-        '400': { description: "Neither/both of package_id+amount_cents given, amount_cents out of [min,max], or malformed input" }
+        '400': { description: "Neither/both of package_id+amount_cents given, the resulting amount out of [min,max] (amount_out_of_range or package_price_out_of_range), or malformed input" }
         '401': { description: Not authenticated }
         '404': { description: Billing module disabled, or package_id does not name an active package }
         '409': { description: provider_order_id already recorded (PayPal order id collision) }
@@ -1251,7 +1293,11 @@ paths:
         user can never capture (and collect credits for) another user's
         order. Idempotent: capturing an already-captured order returns
         credited=false with the unchanged balance instead of calling PayPal
-        again.
+        again. PayPal answers 2xx even for a PENDING or DECLINED capture —
+        the wallet is only ever credited when PayPal's own capture status is
+        COMPLETED; otherwise the payment is left uncaptured (for the webhook
+        to resolve later) and the response reports credited=false with the
+        real status.
       tags: [billing]
       security: [{ BearerAuth: [] }]
       requestBody:
@@ -1265,10 +1311,13 @@ paths:
                 order_id: { type: string, description: PayPal order id, as returned by POST .../topup }
       responses:
         '200':
-          description: Captured (or replayed idempotently) — wallet balance after this call
+          description: >
+            Captured, replayed idempotently, or still pending/declined on
+            PayPal's side — see CaptureResponse.status/pending to tell them apart.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/CaptureResponse' }
         '400': { description: order_id missing or not a string }
         '401': { description: Not authenticated }
         '404': { description: "Billing module disabled, or no such order for this caller" }
+        '409': { description: "This payment is failed/refunded and cannot be captured (payment_not_capturable), or PayPal reports the order hasn't been approved yet (order_not_approved)" }

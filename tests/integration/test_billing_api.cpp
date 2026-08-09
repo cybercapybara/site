@@ -18,6 +18,8 @@
  */
 
 #include <memory>
+#include <optional>
+#include <stdexcept>
 #include <string>
 
 #include <drogon/HttpRequest.h>
@@ -56,6 +58,14 @@ public:
     // amount/currency guard passes.
     std::int64_t capture_amount_cents = 0;
     std::string capture_currency = "USD";
+    // PayPal's own capture status — "COMPLETED" by default. Set to
+    // "PENDING"/"DECLINED" (or anything else) to exercise
+    // BillingController::capture's "don't credit unless COMPLETED" branch.
+    std::string capture_status = "COMPLETED";
+    // If set, capture_order() throws std::runtime_error(*capture_throw_message)
+    // instead of returning — simulates a PayPal-side failure (transient, or a
+    // structured error like ORDER_NOT_APPROVED).
+    std::optional<std::string> capture_throw_message;
 
     std::int64_t last_create_amount_cents = 0;
     std::string last_create_currency;
@@ -78,10 +88,13 @@ public:
     Billing::PayPalCapture capture_order(const std::string& order_id) override {
         ++capture_order_calls;
         last_captured_order_id = order_id;
+        if (capture_throw_message)
+            throw std::runtime_error(*capture_throw_message);
         Billing::PayPalCapture out;
         out.capture_id = next_capture_id;
         out.amount_cents = capture_amount_cents;
         out.currency = capture_currency;
+        out.status = capture_status;
         return out;
     }
 };
@@ -197,6 +210,20 @@ TEST_F(BillingApiTest, ListPackagesReturnsOnlyActiveOnes) {
     EXPECT_EQ(body["data"][0]["title"], "Starter");
 }
 
+TEST_F(BillingApiTest, ListPackagesIncludesRateAndBounds) {
+    // Task 8's custom-amount input validates against these client-side; the
+    // brief requires them alongside the package list, per config_overrides.
+    auto user = seed_user("rate-checker@example.com");
+
+    HttpResponsePtr resp;
+    controller.listPackages(TestHelpers::authed(user), [&](const HttpResponsePtr& r) { resp = r; });
+    ASSERT_EQ(resp->statusCode(), k200OK);
+    auto body = json::parse(std::string(resp->body()));
+    EXPECT_EQ(body["credits_per_unit"], 100);
+    EXPECT_EQ(body["min_amount_cents"], 100);
+    EXPECT_EQ(body["max_amount_cents"], 100000);
+}
+
 // ── topup ────────────────────────────────────────────────────────────────
 
 TEST_F(BillingApiTest, TopupWithPackageFreezesRateAndCredits) {
@@ -238,6 +265,36 @@ TEST_F(BillingApiTest, TopupWithCustomAmountRespectsMinMax) {
     EXPECT_EQ(above["error"], "amount_out_of_range");
 
     // Neither attempt created a payment row.
+    EXPECT_EQ(fake->create_order_calls, 0);
+}
+
+TEST_F(BillingApiTest, TopupWithCustomAmountAcceptsExactBoundaries) {
+    auto user = seed_user("boundary-buyer@example.com");
+
+    fake->next_order_id = "ORDER-MIN";
+    int min_status = 0;
+    do_topup(user, json{{"amount_cents", 100}}, &min_status);  // exactly min
+    EXPECT_EQ(min_status, k201Created);
+
+    fake->next_order_id = "ORDER-MAX";
+    int max_status = 0;
+    do_topup(user, json{{"amount_cents", 100000}}, &max_status);  // exactly max
+    EXPECT_EQ(max_status, k201Created);
+
+    EXPECT_EQ(fake->create_order_calls, 2);
+}
+
+TEST_F(BillingApiTest, TopupEnforcesMinMaxOnPackagePriceToo) {
+    auto user = seed_user("cheap-package-buyer@example.com");
+    // Priced below billing.min_amount_cents (100) — an admin data-entry
+    // mistake must not be silently sellable just because it came from the
+    // package catalogue instead of a client-supplied amount_cents.
+    auto pkg = seed_package("Too Cheap", /*amount_cents=*/50, /*credits=*/50);
+
+    int status = 0;
+    auto body = do_topup(user, json{{"package_id", pkg.id}}, &status);
+    EXPECT_EQ(status, k400BadRequest);
+    EXPECT_EQ(body["error"], "package_price_out_of_range");
     EXPECT_EQ(fake->create_order_calls, 0);
 }
 
@@ -338,6 +395,144 @@ TEST_F(BillingApiTest, CaptureUnknownOrderReturns404) {
     EXPECT_EQ(fake->capture_order_calls, 0);
 }
 
+// IMPORTANT-1 fix-round-1: PayPal answers 2xx for a PENDING capture (eCheck,
+// fraud review) too — a 2xx response is not proof the money settled. The
+// wallet must stay untouched and the payment must stay uncaptured until a
+// later resolution (Task 5's webhook) sees a final status.
+TEST_F(BillingApiTest, CapturePendingLeavesPaymentUncapturedAndWalletUntouched) {
+    auto user = seed_user("pending-buyer@example.com");
+    fake->next_order_id = "ORDER-PENDING-1";
+    do_topup(user, json{{"amount_cents", 1000}});
+    fake->capture_amount_cents = 1000;
+    fake->capture_currency = "USD";
+    fake->capture_status = "PENDING";
+
+    int status = 0;
+    auto body = do_capture(user, "ORDER-PENDING-1", &status);
+    EXPECT_EQ(status, k200OK);
+    EXPECT_FALSE(body["data"]["credited"].get<bool>());
+    EXPECT_EQ(body["data"]["balance"], 0);
+    EXPECT_EQ(body["data"]["status"], "PENDING");
+    EXPECT_TRUE(body["data"]["pending"].get<bool>());
+
+    EXPECT_EQ(Billing::balance_of(user.subject), 0);
+    EXPECT_EQ(Billing::history(user.subject, 10, 0).size(), 0u);  // no ledger row at all
+    auto payment = payments.find_by_order_id("ORDER-PENDING-1");
+    ASSERT_TRUE(payment.has_value());
+    EXPECT_NE(payment->status, "captured");
+    EXPECT_FALSE(payment->provider_capture_id.has_value());
+}
+
+// Same as above, DECLINED instead of PENDING — PayPal answers 2xx for this
+// too, and it must be treated identically: no credit, payment left uncaptured.
+TEST_F(BillingApiTest, CaptureDeclinedLeavesPaymentUncapturedAndWalletUntouched) {
+    auto user = seed_user("declined-buyer@example.com");
+    fake->next_order_id = "ORDER-DECLINED-1";
+    do_topup(user, json{{"amount_cents", 1000}});
+    fake->capture_amount_cents = 1000;
+    fake->capture_currency = "USD";
+    fake->capture_status = "DECLINED";
+
+    int status = 0;
+    auto body = do_capture(user, "ORDER-DECLINED-1", &status);
+    EXPECT_EQ(status, k200OK);
+    EXPECT_FALSE(body["data"]["credited"].get<bool>());
+    EXPECT_EQ(body["data"]["status"], "DECLINED");
+    EXPECT_TRUE(body["data"]["pending"].get<bool>());
+
+    EXPECT_EQ(Billing::balance_of(user.subject), 0);
+    auto payment = payments.find_by_order_id("ORDER-DECLINED-1");
+    ASSERT_TRUE(payment.has_value());
+    EXPECT_NE(payment->status, "captured");
+}
+
+TEST_F(BillingApiTest, CaptureOfFailedPaymentReturns409WithoutCallingPayPal) {
+    auto user = seed_user("failed-payment-buyer@example.com");
+    fake->next_order_id = "ORDER-FAILED-1";
+    do_topup(user, json{{"amount_cents", 1000}});
+    // Force the payment to 'failed' directly (amount mismatch), the same way
+    // test_wallet.cpp does — bypasses the controller/fake entirely, so this
+    // doesn't touch fake->capture_order_calls.
+    Billing::credit_capture("ORDER-FAILED-1", "CAPTURE-MISMATCH", /*captured_amount_cents=*/999, "USD");
+    auto pre = payments.find_by_order_id("ORDER-FAILED-1");
+    ASSERT_TRUE(pre.has_value());
+    ASSERT_EQ(pre->status, "failed");
+
+    int status = 0;
+    auto body = do_capture(user, "ORDER-FAILED-1", &status);
+    EXPECT_EQ(status, k409Conflict);
+    EXPECT_EQ(body["error"], "payment_not_capturable");
+    EXPECT_EQ(fake->capture_order_calls, 0);  // never even asked PayPal
+}
+
+TEST_F(BillingApiTest, CaptureOfRefundedPaymentReturns409WithoutCallingPayPalAgain) {
+    auto user = seed_user("refunded-payment-buyer@example.com");
+    fake->next_order_id = "ORDER-REFUNDED-1";
+    do_topup(user, json{{"amount_cents", 1000}});
+    fake->capture_amount_cents = 1000;
+    fake->capture_currency = "USD";
+    int captured_status = 0;
+    do_capture(user, "ORDER-REFUNDED-1", &captured_status);
+    ASSERT_EQ(captured_status, k200OK);
+    EXPECT_EQ(fake->capture_order_calls, 1);
+
+    Billing::refund_capture("CAPTURE-FAKE-1", "REFUND-FULL", /*refunded_amount_cents=*/1000);
+    auto refunded = payments.find_by_order_id("ORDER-REFUNDED-1");
+    ASSERT_TRUE(refunded.has_value());
+    ASSERT_EQ(refunded->status, "refunded");
+
+    int status = 0;
+    auto body = do_capture(user, "ORDER-REFUNDED-1", &status);
+    EXPECT_EQ(status, k409Conflict);
+    EXPECT_EQ(body["error"], "payment_not_capturable");
+    // The earlier successful capture is the only real PayPal call made.
+    EXPECT_EQ(fake->capture_order_calls, 1);
+}
+
+TEST_F(BillingApiTest, CaptureMapsOrderNotApprovedToConflict) {
+    auto user = seed_user("not-approved-buyer@example.com");
+    fake->next_order_id = "ORDER-NOT-APPROVED-1";
+    do_topup(user, json{{"amount_cents", 1000}});
+    // Shape of a real PayPal Orders API 422 for this issue, after
+    // describe_error_body's details[].issue extraction.
+    fake->capture_throw_message =
+        "paypal: capture_order failed with HTTP 422: name=UNPROCESSABLE_ENTITY issue=ORDER_NOT_APPROVED";
+
+    int status = 0;
+    auto body = do_capture(user, "ORDER-NOT-APPROVED-1", &status);
+    EXPECT_EQ(status, k409Conflict);
+    EXPECT_EQ(body["error"], "order_not_approved");
+
+    // No partial state: the payment is untouched, nothing was credited.
+    EXPECT_EQ(Billing::balance_of(user.subject), 0);
+    auto payment = payments.find_by_order_id("ORDER-NOT-APPROVED-1");
+    ASSERT_TRUE(payment.has_value());
+    EXPECT_NE(payment->status, "captured");
+    EXPECT_NE(payment->status, "failed");
+}
+
+// IMPORTANT-3 fix-round-1: a PayPal failure that ISN'T a recognized 4xx-shaped
+// issue must surface as a plain 500 with no partial/inconsistent DB state —
+// no ledger row, no payment mutation, and the request is safely retryable.
+TEST_F(BillingApiTest, CaptureSurfacesGenericPayPalFailureAsInternalErrorWithNoPartialState) {
+    auto user = seed_user("outage-buyer@example.com");
+    fake->next_order_id = "ORDER-OUTAGE-1";
+    do_topup(user, json{{"amount_cents", 1000}});
+    fake->capture_throw_message = "paypal: capture_order failed with HTTP 500: internal server error";
+
+    int status = 0;
+    auto body = do_capture(user, "ORDER-OUTAGE-1", &status);
+    EXPECT_EQ(status, k500InternalServerError);
+    EXPECT_EQ(body["error"], "internal_error");
+
+    EXPECT_EQ(Billing::balance_of(user.subject), 0);
+    EXPECT_EQ(Billing::history(user.subject, 10, 0).size(), 0u);
+    auto payment = payments.find_by_order_id("ORDER-OUTAGE-1");
+    ASSERT_TRUE(payment.has_value());
+    EXPECT_EQ(payment->status, "created");  // untouched — not failed, not captured
+    EXPECT_FALSE(payment->provider_capture_id.has_value());
+}
+
 // ── wallet ───────────────────────────────────────────────────────────────
 
 TEST_F(BillingApiTest, WalletShowsOwnBalanceAndHistoryOnly) {
@@ -368,6 +563,21 @@ TEST_F(BillingApiTest, WalletShowsOwnBalanceAndHistoryOnly) {
     auto bob_wallet = json::parse(std::string(resp->body()));
     EXPECT_EQ(bob_wallet["data"]["balance"], 0);
     EXPECT_EQ(bob_wallet["data"]["history"].size(), 0u);
+}
+
+// MINOR fix-round-1: created_by (an admin's raw UUID) must never leak into
+// the user-facing wallet view, even for ledger kinds (adjustment) that carry
+// one internally.
+TEST_F(BillingApiTest, WalletHistoryNeverExposesCreatedBy) {
+    auto user = seed_user("adjusted-user@example.com");
+    auto admin = seed_user("some-admin@example.com");
+    Billing::adjust(user.subject, 250, "goodwill credit", admin.subject);
+
+    auto wallet = do_wallet(user);
+    ASSERT_EQ(wallet["data"]["history"].size(), 1u);
+    const auto& entry = wallet["data"]["history"][0];
+    EXPECT_EQ(entry["kind"], "adjustment");
+    EXPECT_FALSE(entry.contains("created_by"));
 }
 
 // ── module gate ──────────────────────────────────────────────────────────

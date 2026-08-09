@@ -66,6 +66,11 @@ public:
     METHOD_LIST_END
 
     // ── GET /api/v1/billing/packages ──────────────────────────────────────
+    // Also returns the current per-unit rate and the custom-amount bounds —
+    // Task 8's custom-amount input validates client-side against these, and
+    // the client has no other way to learn them (they're never guessable
+    // from the package list alone: a package's own price/credits ratio can
+    // legitimately differ from the generic rate — see topup's doc comment).
     void listPackages(const HttpRequestPtr& req, std::function<void(const HttpResponsePtr&)>&& callback) {
         if (!Core::billing_enabled()) {
             callback(ErrorResponse::not_found("billing"));
@@ -78,7 +83,12 @@ public:
             json data = json::array();
             for (const auto& p : items)
                 data.push_back(p);
-            callback(Response::list(data));
+            std::int64_t rate = 0, min_cents = 0, max_cents = 0;
+            billing_limits(rate, min_cents, max_cents);
+            callback(Response::ok({{"data", data},
+                                   {"credits_per_unit", rate},
+                                   {"min_amount_cents", min_cents},
+                                   {"max_amount_cents", max_cents}}));
         });
     }
 
@@ -97,7 +107,7 @@ public:
             auto hist = Billing::history(principal->subject, page.limit, page.offset);
             json data = json::array();
             for (const auto& e : hist)
-                data.push_back(e);
+                data.push_back(public_wallet_entry(e));
             callback(Response::ok(
                 {{"data", {{"balance", balance}, {"history", data}}}, {"limit", page.limit}, {"offset", page.offset}}));
         });
@@ -174,7 +184,10 @@ public:
 
         with_repo_errors(callback, "billing capture", [&] {
             Repositories::PaymentRepository payments;
-            auto payment = payments.find_by_order_id(order_id);
+            // Read the PRIMARY: a capture attempted moments after topup (the
+            // common case — the buyer approves on PayPal and bounces straight
+            // back) must not spuriously 404 because of replica lag.
+            auto payment = payments.find_by_order_id(order_id, /*from_primary=*/true);
             if (!payment) {
                 callback(ErrorResponse::not_found("payment"));
                 return;
@@ -198,17 +211,85 @@ public:
                 // second real PayPal capture on an already-captured order is
                 // an error on PayPal's side, not a no-op.
                 const auto balance = Billing::balance_of(principal->subject, /*from_primary=*/true);
-                callback(Response::ok({{"data", {{"credited", false}, {"balance", balance}}}}));
+                callback(Response::ok({{"data", {{"credited", false}, {"balance", balance}, {"status", "captured"}}}}));
+                return;
+            }
+            if (owned->status == Domain::PaymentStatus::kFailed || owned->status == Domain::PaymentStatus::kRefunded) {
+                // A clean 409, no PayPal call — capturing an order that's
+                // already failed or refunded on our side can only ever error
+                // on PayPal's side too (or worse, be misleading).
+                callback(ErrorResponse::conflict(
+                    "payment_not_capturable", "This payment is " + owned->status + " and cannot be captured"));
                 return;
             }
 
-            auto cap = Billing::PayPalClient::get().capture_order(order_id);
+            Billing::PayPalCapture cap;
+            try {
+                cap = Billing::PayPalClient::get().capture_order(order_id);
+            } catch (const std::exception& e) {
+                // PayPal's own "buyer hasn't approved this order yet" error —
+                // a real, expected 4xx-shaped condition (a client racing the
+                // approve redirect), not a server fault.
+                if (std::string(e.what()).find("ORDER_NOT_APPROVED") != std::string::npos) {
+                    callback(ErrorResponse::conflict("order_not_approved",
+                                                     "This PayPal order has not been approved yet"));
+                    return;
+                }
+                throw;  // anything else: with_repo_errors' outer catch maps it to 500.
+            }
+
+            if (cap.status != "COMPLETED") {
+                // PayPal answers 2xx for PENDING (eCheck, fraud review) and
+                // DECLINED captures too — crediting on either would hand out
+                // credits for money that may never settle. Leave the payment
+                // uncaptured (still created/approved) so the webhook (Task 5)
+                // can resolve it once PayPal reaches a final state.
+                const auto balance = Billing::balance_of(principal->subject);
+                callback(Response::ok({{"data",
+                                        {{"credited", false},
+                                         {"balance", balance},
+                                         {"status", cap.status},
+                                         {"pending", true}}}}));
+                return;
+            }
+
             auto result = Billing::credit_capture(order_id, cap.capture_id, cap.amount_cents, cap.currency);
-            callback(Response::ok({{"data", {{"credited", result.credited}, {"balance", result.balance}}}}));
+            callback(Response::ok(
+                {{"data", {{"credited", result.credited}, {"balance", result.balance}, {"status", "captured"}}}}));
         });
     }
 
 private:
+    // Strips `created_by` (an admin's raw UUID on adjustment rows) before a
+    // wallet_entries row is ever handed to an end user — Domain::to_json
+    // includes it for internal/admin views, but this endpoint is user-facing.
+    static json public_wallet_entry(const Domain::WalletEntry& e) {
+        return json{
+            {"id", e.id},
+            {"user_id", e.user_id},
+            {"delta_credits", e.delta_credits},
+            {"kind", e.kind},
+            {"reference", e.reference},
+            {"note", e.note},
+            {"created_at", e.created_at},
+        };
+    }
+
+    // Config::parse_env_value<T> has no std::int64_t specialization (only
+    // int/long/double/bool/string — see utils/Config.hpp) and silently falls
+    // back to T{} = 0 for an unknown T, so every money-shaped config read
+    // goes through `long` (this codebase's existing convention, e.g.
+    // server.max_body_bytes in main.cpp) and is narrowed to std::int64_t
+    // afterward, never read as std::int64_t directly.
+    static void billing_limits(std::int64_t& rate, std::int64_t& min_cents, std::int64_t& max_cents) {
+        auto& cfg = Config::get();
+        rate = static_cast<std::int64_t>(cfg.get<long>("billing.credits_per_unit", "BILLING_CREDITS_PER_UNIT", 100));
+        min_cents =
+            static_cast<std::int64_t>(cfg.get<long>("billing.min_amount_cents", "BILLING_MIN_AMOUNT_CENTS", 100));
+        max_cents =
+            static_cast<std::int64_t>(cfg.get<long>("billing.max_amount_cents", "BILLING_MAX_AMOUNT_CENTS", 100000));
+    }
+
     struct TopupPlan {
         std::int64_t amount_cents = 0;
         std::int64_t credits_expected = 0;
@@ -219,19 +300,15 @@ private:
     // Resolves amount_cents/credits_expected/rate_snapshot/package_id
     // entirely server-side. Deliberately never reads a "credits" key from
     // @p body at any point — the caller cannot influence the credited
-    // amount by sending one.
+    // amount by sending one. min/max_amount_cents is enforced on the
+    // resulting amount_cents for BOTH branches — a misconfigured package
+    // price outside the configured bounds is refused just like an
+    // out-of-range custom amount, not silently sold.
     static bool resolve_topup_plan(const json& body,
                                    TopupPlan& out,
                                    const std::function<void(const HttpResponsePtr&)>& callback) {
-        auto& cfg = Config::get();
-        // Config::parse_env_value<T> has no std::int64_t specialization (only
-        // int/long/double/bool/string — see utils/Config.hpp) and silently
-        // falls back to T{} = 0 for an unknown T, so every money-shaped config
-        // read here goes through `long` (this codebase's existing convention,
-        // e.g. server.max_body_bytes in main.cpp) and is narrowed to
-        // std::int64_t afterwards, never read as std::int64_t directly.
-        out.rate_snapshot =
-            static_cast<std::int64_t>(cfg.get<long>("billing.credits_per_unit", "BILLING_CREDITS_PER_UNIT", 100));
+        std::int64_t min_cents = 0, max_cents = 0;
+        billing_limits(out.rate_snapshot, min_cents, max_cents);
 
         const bool has_package = body.contains("package_id") && body["package_id"].is_string() &&
                                  !body["package_id"].get<std::string>().empty();
@@ -260,27 +337,23 @@ private:
             // Frozen exactly as priced by the admin catalogue — never
             // re-derived from the current per-unit rate.
             out.credits_expected = pkg->credits;
-            return true;
+        } else {
+            if (!body["amount_cents"].is_number_integer()) {
+                callback(ErrorResponse::bad_request("not_integer", "amount_cents must be an integer"));
+                return false;
+            }
+            out.amount_cents = body["amount_cents"].get<std::int64_t>();
+            // Integer math only — see Billing::refund_capture's identical rule.
+            out.credits_expected = (out.amount_cents * out.rate_snapshot) / 100;
         }
 
-        if (!body["amount_cents"].is_number_integer()) {
-            callback(ErrorResponse::bad_request("not_integer", "amount_cents must be an integer"));
-            return false;
-        }
-        const std::int64_t amount_cents = body["amount_cents"].get<std::int64_t>();
-        const std::int64_t min_cents =
-            static_cast<std::int64_t>(cfg.get<long>("billing.min_amount_cents", "BILLING_MIN_AMOUNT_CENTS", 100));
-        const std::int64_t max_cents =
-            static_cast<std::int64_t>(cfg.get<long>("billing.max_amount_cents", "BILLING_MAX_AMOUNT_CENTS", 100000));
-        if (amount_cents <= 0 || amount_cents < min_cents || amount_cents > max_cents) {
+        if (out.amount_cents <= 0 || out.amount_cents < min_cents || out.amount_cents > max_cents) {
+            const char* code = has_package ? "package_price_out_of_range" : "amount_out_of_range";
             callback(ErrorResponse::bad_request(
-                "amount_out_of_range",
+                code,
                 "amount_cents must be between " + std::to_string(min_cents) + " and " + std::to_string(max_cents)));
             return false;
         }
-        out.amount_cents = amount_cents;
-        // Integer math only — see Billing::refund_capture's identical rule.
-        out.credits_expected = (amount_cents * out.rate_snapshot) / 100;
         return true;
     }
 };

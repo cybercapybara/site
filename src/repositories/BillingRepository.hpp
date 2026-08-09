@@ -172,14 +172,18 @@ public:
             });
     }
 
-    std::optional<Domain::Payment> find_by_order_id(const std::string& provider_order_id) {
-        return Database::get().execute_read([&](auto& txn) -> std::optional<Domain::Payment> {
+    /// @p from_primary — see CrudBase::find. A capture attempted moments
+    /// after topup created this row must not spuriously 404 because of
+    /// replica lag; BillingController::capture always passes true.
+    std::optional<Domain::Payment> find_by_order_id(const std::string& provider_order_id, bool from_primary = false) {
+        auto query = [&](auto& txn) -> std::optional<Domain::Payment> {
             auto r = txn.exec_params(std::string("SELECT ") + kColumns + " FROM payments WHERE provider_order_id = $1",
                                      provider_order_id);
             if (r.empty())
                 return std::nullopt;
             return Domain::Payment::from_row(r[0]);
-        });
+        };
+        return from_primary ? Database::get().execute_read_primary(query) : Database::get().execute_read(query);
     }
 
     std::optional<Domain::Payment> find_by_capture_id(const std::string& provider_capture_id) {

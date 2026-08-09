@@ -354,15 +354,15 @@ TEST_F(WalletTest, RefundBeyondRemainingBalanceMarksPaymentRefundedWithoutGoingN
     EXPECT_EQ(Billing::history(user_id, 10, 0).size(), 2u);
 }
 
-// NEW-1: a refund small enough that it converts to 0 credits at the
-// payment's rate must never trip wallet_entries' CHECK(delta_credits <> 0)
-// — it used to escape as an uncaught 500 that PayPal would redeliver
-// forever. Also exercises NEW-4: since this is a PARTIAL refund
-// (50 cents of a 1000-cent payment), the payment status must stay
-// 'captured', not flip to 'refunded'.
+// NEW-1: a refund small enough that it converts to 0 credits must never trip
+// wallet_entries' CHECK(delta_credits <> 0) — it used to escape as an
+// uncaught 500 that PayPal would redeliver forever. Also exercises NEW-4:
+// since this is a PARTIAL refund (50 cents of a 1000-cent payment), the
+// payment status must stay 'captured', not flip to 'refunded'.
 TEST_F(WalletTest, RefundSubUnitAmountConvertsToZeroCreditsIsRecordedNotCrashed) {
     auto user_id = seed_user("buyer5b@example.com");
-    // rate=1 (1 credit per 100 cents) — 50 cents converts to 0 credits.
+    // 10 credits for the whole 1000-cent payment — 50 cents prorates to
+    // (10 * 50) / 1000 = 0 credits (floors below 1 unit).
     seed_payment(user_id, "ORDER-5B", /*amount_cents=*/1000, /*credits_expected=*/10, /*rate_snapshot=*/1);
     auto captured = Billing::credit_capture("ORDER-5B", "CAPTURE-5B", 1000, "USD");
     ASSERT_TRUE(captured.credited);
@@ -384,6 +384,39 @@ TEST_F(WalletTest, RefundSubUnitAmountConvertsToZeroCreditsIsRecordedNotCrashed)
     auto found = payments.find_by_capture_id("CAPTURE-5B");
     ASSERT_TRUE(found.has_value());
     EXPECT_EQ(found->status, "captured");
+}
+
+// CRITICAL fix-round-1 regression test: refund_capture must prorate off
+// credits_expected, NOT rate_snapshot. A bonus package sells 500 credits for
+// only 400 cents (rate_snapshot frozen at the unrelated generic per-unit
+// rate, 100 — i.e. "1 credit per cent" — which would derive only 400 credits
+// from 400 cents if the old formula were still used). A FULL refund must
+// deduct exactly the 500 credits that were actually granted, not 400 — proof
+// that credit_capture and refund_capture agree on what a "full refund" means
+// regardless of how the payment was priced.
+TEST_F(WalletTest, RefundOfBonusPackagePurchaseDeductsExactCreditsGranted) {
+    auto user_id = seed_user("buyer5g@example.com");
+    seed_payment(user_id,
+                 "ORDER-5G",
+                 /*amount_cents=*/400,
+                 /*credits_expected=*/500,
+                 /*rate_snapshot=*/100);  // rate disagrees with credits_expected on purpose
+    auto captured = Billing::credit_capture("ORDER-5G", "CAPTURE-5G", 400, "USD");
+    ASSERT_TRUE(captured.credited);
+    ASSERT_EQ(captured.balance, 500);
+
+    auto refunded = Billing::refund_capture("CAPTURE-5G", "REFUND-5G", /*refunded_amount_cents=*/400);
+    EXPECT_TRUE(refunded.credited);
+    // A rate_snapshot-based conversion would have computed 400*100/100=400,
+    // leaving the user with 100 credits after a "full" refund. The correct,
+    // credits_expected-prorated answer deducts all 500.
+    EXPECT_EQ(refunded.balance, 0);
+    EXPECT_EQ(Billing::balance_of(user_id), 0);
+    EXPECT_EQ(refund_outcome("REFUND-5G"), "applied");
+
+    auto found = payments.find_by_capture_id("CAPTURE-5G");
+    ASSERT_TRUE(found.has_value());
+    EXPECT_EQ(found->status, "refunded");
 }
 
 // NEW-4: a normal (nonzero-credit, sufficient-balance) PARTIAL refund must

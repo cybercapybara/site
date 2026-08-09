@@ -342,10 +342,26 @@ inline CreditResult credit_capture(const std::string& provider_order_id,
 }
 
 /**
- * @brief Idempotent refund. Converts @p refunded_amount_cents to credits via
- *        the payment's frozen `rate_snapshot` (integer division — no
- *        floating point) and writes a negative `refund` ledger entry IF the
- *        conversion and the current balance allow it.
+ * @brief Idempotent refund. Converts @p refunded_amount_cents to credits by
+ *        prorating the payment's frozen `credits_expected` —
+ *        `credits_expected * refunded_amount_cents / amount_cents` (integer
+ *        division — no floating point) — and writes a negative `refund`
+ *        ledger entry IF the conversion and the current balance allow it.
+ *
+ *        Deliberately NOT `refunded_amount_cents * rate_snapshot / 100`: a
+ *        package sale's `credits_expected` is priced independently of
+ *        `rate_snapshot` (a bonus/discount package hands out more or fewer
+ *        credits than the generic per-unit rate would imply — see
+ *        BillingController::topup), so a rate_snapshot-based conversion
+ *        silently disagrees with what was actually credited. Prorating off
+ *        `credits_expected` instead is exact for a full refund by
+ *        construction — `(X * Y) / Y == X` for any nonzero Y, so
+ *        `refunded_amount_cents == amount_cents` always yields exactly
+ *        `credits_expected` back, whether the payment came from a package or
+ *        a custom amount — and proportional (floored) for a partial one.
+ *        `rate_snapshot` is retained on `payments` purely as an informational
+ *        record of the per-unit rate in effect at purchase time; nothing in
+ *        this file reads it anymore.
  *
  * ONE transaction. The durable idempotency marker is a `billing_refunds` row
  * (migrations/008_billing_refunds.sql), written on EVERY non-duplicate call,
@@ -378,8 +394,10 @@ inline CreditResult credit_capture(const std::string& provider_order_id,
  *      InvalidRefundAmount; the whole transaction rolls back, nothing is
  *      written — not even a `billing_refunds` row, since this refund was
  *      never a real attempt against this payment.
- *   4. Convert to credits (`refunded_amount_cents * rate_snapshot / 100`,
- *      integer division). `SELECT credits FROM wallet_balances ... FOR
+ *   4. Convert to credits (`credits_expected * refunded_amount_cents /
+ *      amount_cents`, integer division — see the function-level note above
+ *      on why this prorates off `credits_expected`, not `rate_snapshot`).
+ *      `SELECT credits FROM wallet_balances ... FOR
  *      UPDATE` locks the user's balance row ONCE, up front, whatever the
  *      outcome — its value seeds the response in every branch below, and is
  *      also the sufficiency-decision input, so there is exactly one query
@@ -388,9 +406,10 @@ inline CreditResult credit_capture(const std::string& provider_order_id,
  *      wallet_entries/wallet_balances CHECK constraints fire (that's what
  *      silently 500'd before):
  *        - `refund_credits == 0`: the amount is too small to represent at
- *          this payment's rate (e.g. rate 10, refund of 1-9 cents). The
- *          `wallet_entries.delta_credits <> 0` CHECK would otherwise reject
- *          the insert outright. Outcome: `skipped_zero_credits`.
+ *          this payment's credits_expected/amount_cents ratio (e.g. 10
+ *          credits for a 1000-cent payment, refund of 1-99 cents floors to
+ *          0). The `wallet_entries.delta_credits <> 0` CHECK would otherwise
+ *          reject the insert outright. Outcome: `skipped_zero_credits`.
  *        - the locked balance can't cover it
  *          (`current_balance - refund_credits < 0`), decided in C++ BEFORE
  *          any write, so `wallet_balances.CHECK (credits >= 0)` is never
@@ -447,14 +466,15 @@ inline CreditResult refund_capture(const std::string& provider_capture_id,
         // payment, and fixes this function's lock order to match
         // credit_capture's (payments, then wallet_balances).
         auto pr = txn.exec_params(
-            "SELECT id, user_id, amount_cents, rate_snapshot FROM payments WHERE provider_capture_id = $1 FOR UPDATE",
+            "SELECT id, user_id, amount_cents, credits_expected FROM payments WHERE provider_capture_id = $1 "
+            "FOR UPDATE",
             provider_capture_id);
         if (pr.empty())
             throw Repositories::PaymentNotFound{};
         const std::string payment_id = pr[0]["id"].template as<std::string>();
         const std::string user_id = pr[0]["user_id"].template as<std::string>();
         const std::int64_t amount_cents = pr[0]["amount_cents"].template as<std::int64_t>();
-        const std::int64_t rate_snapshot = pr[0]["rate_snapshot"].template as<std::int64_t>();
+        const std::int64_t credits_expected = pr[0]["credits_expected"].template as<std::int64_t>();
 
         // Idempotency FIRST, via the durable marker — see the function docs
         // for why this can no longer be "does a wallet_entries row exist".
@@ -495,10 +515,11 @@ inline CreditResult refund_capture(const std::string& provider_capture_id,
             throw InvalidRefundAmount{};
         }
 
-        // Integer division against the frozen per-payment rate — no floats.
-        // For a full refund (refunded_amount_cents == amount_cents) this is
-        // exactly payments.credits_expected, when it's nonzero.
-        const std::int64_t refund_credits = (refunded_amount_cents * rate_snapshot) / 100;
+        // Prorate off credits_expected, NOT rate_snapshot — see the
+        // function-level doc comment. `(credits_expected * amount_cents) /
+        // amount_cents == credits_expected` exactly for a full refund, no
+        // matter how credits_expected was priced (package or custom).
+        const std::int64_t refund_credits = (credits_expected * refunded_amount_cents) / amount_cents;
 
         // Lock the balance row ONCE, up front, whatever the outcome turns
         // out to be — its value seeds the response in all three branches
@@ -511,18 +532,20 @@ inline CreditResult refund_capture(const std::string& provider_capture_id,
         std::int64_t credits_deducted = 0;
 
         if (refund_credits == 0) {
-            // Too small to represent at this rate — inserting delta_credits=0
-            // would trip wallet_entries' CHECK (delta_credits <> 0). Record
-            // the attempt and move on instead of letting that escape as a
-            // raw constraint violation (that used to 500 and get redelivered
-            // by PayPal forever).
+            // Too small to represent at this payment's credits_expected/
+            // amount_cents ratio — inserting delta_credits=0 would trip
+            // wallet_entries' CHECK (delta_credits <> 0). Record the attempt
+            // and move on instead of letting that escape as a raw constraint
+            // violation (that used to 500 and get redelivered by PayPal
+            // forever).
             outcome = "skipped_zero_credits";
             spdlog::error(
-                "billing: refund {} for payment {} converts to 0 credits at rate {} (refunded_amount_cents={}) — "
-                "recorded, wallet untouched; manual reconciliation may be needed",
+                "billing: refund {} for payment {} converts to 0 credits (credits_expected={} amount_cents={} "
+                "refunded_amount_cents={}) — recorded, wallet untouched; manual reconciliation may be needed",
                 provider_refund_id,
                 payment_id,
-                rate_snapshot,
+                credits_expected,
+                amount_cents,
                 refunded_amount_cents);
         } else if (new_balance - refund_credits < 0) {
             outcome = "skipped_insufficient";

@@ -65,6 +65,35 @@ TEST(PayPalClient, ParseCaptureExtractsIdAndIntegerCents) {
     // 1233/1235 the way a naive `llround(stod(...) * 100)` could for some
     // decimal values.
     EXPECT_EQ(cap.amount_cents, 1234);
+    // Callers (BillingController::capture) MUST branch on this before
+    // crediting anything — see PayPalCapture's doc comment.
+    EXPECT_EQ(cap.status, "COMPLETED");
+}
+
+TEST(PayPalClient, ParseCaptureExtractsNonCompletedStatusVerbatim) {
+    // PayPal answers 2xx for a PENDING or DECLINED capture too — the parser
+    // must hand the real status back unmodified, not silently normalize it.
+    for (const std::string& status : {"PENDING", "DECLINED"}) {
+        const std::string body = R"JSON({
+            "purchase_units": [
+                {
+                    "payments": {
+                        "captures": [
+                            {
+                                "id": "CAP-)JSON" +
+                                     status + R"JSON(",
+                                "status": ")JSON" +
+                                     status + R"JSON(",
+                                "amount": { "currency_code": "USD", "value": "5.00" }
+                            }
+                        ]
+                    }
+                }
+            ]
+        })JSON";
+        const PayPalCapture cap = PayPalClient::parse_capture_response(body);
+        EXPECT_EQ(cap.status, status);
+    }
 }
 
 TEST(PayPalClient, ParseCaptureRejectsMalformedBody) {
@@ -84,6 +113,14 @@ TEST(PayPalClient, ParseCaptureRejectsMalformedBody) {
     // capture present with amount but missing currency_code.
     EXPECT_THROW(PayPalClient::parse_capture_response(
                      R"({"purchase_units":[{"payments":{"captures":[{"id":"c1","amount":{"value":"1.00"}}]}}]})"),
+                 std::runtime_error);
+    // capture present with a full amount but missing status entirely — must
+    // never silently default to an empty (falsy-looking, but NOT "COMPLETED")
+    // status; a caller comparing against "COMPLETED" would treat that as
+    // "not completed" today, but requiring it up front removes any doubt.
+    EXPECT_THROW(PayPalClient::parse_capture_response(
+                     R"({"purchase_units":[{"payments":{"captures":[{"id":"c1",)"
+                     R"("amount":{"value":"1.00","currency_code":"USD"}}]}}]})"),
                  std::runtime_error);
 
     // None of the malformed bodies above may fall through to a default
@@ -192,6 +229,19 @@ TEST(PayPalClient, DescribeErrorBodyExtractsOAuthFields) {
     const std::string desc = detail::describe_error_body(body);
     EXPECT_NE(desc.find("error=invalid_client"), std::string::npos);
     EXPECT_NE(desc.find("error_description=Client Authentication failed"), std::string::npos);
+}
+
+TEST(PayPalClient, DescribeErrorBodyExtractsDetailsIssue) {
+    // Real PayPal Orders API 422 shape for "capture an order the buyer never
+    // approved" — the actionable code lives in details[].issue, not in name
+    // (which is just the generic "UNPROCESSABLE_ENTITY" bucket).
+    const std::string body =
+        R"({"name":"UNPROCESSABLE_ENTITY","message":"The requested action could not be performed.",)"
+        R"("details":[{"issue":"ORDER_NOT_APPROVED","description":"Payer has not yet approved the Order"}],)"
+        R"("debug_id":"xyz789"})";
+    const std::string desc = detail::describe_error_body(body);
+    EXPECT_NE(desc.find("name=UNPROCESSABLE_ENTITY"), std::string::npos);
+    EXPECT_NE(desc.find("issue=ORDER_NOT_APPROVED"), std::string::npos);
 }
 
 TEST(PayPalClient, DescribeErrorBodyFallsBackToRawBodyWhenNotJson) {

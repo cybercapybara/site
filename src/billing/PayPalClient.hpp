@@ -83,10 +83,17 @@ struct PayPalOrder {
 /// Billing::credit_capture(order_id, capture_id, amount_cents, currency)
 /// directly (Task 4) — field names/types are chosen to match that call
 /// site verbatim.
+///
+/// `status` is PayPal's own capture status verbatim (e.g. "COMPLETED",
+/// "PENDING", "DECLINED"). PayPal answers 2xx for ALL of these — a 2xx HTTP
+/// response is not proof the money actually settled. Callers MUST check
+/// `status == "COMPLETED"` before ever crediting a wallet from this struct;
+/// `capture_order`'s own doc comment repeats this.
 struct PayPalCapture {
     std::string capture_id;
     std::int64_t amount_cents = 0;
     std::string currency;
+    std::string status;
 };
 
 namespace detail {
@@ -252,6 +259,21 @@ inline std::string describe_error_body(const std::string& resp_body) {
     append_field("debug_id");
     append_field("error");
     append_field("error_description");
+    // Orders API 422s (e.g. capturing an order the buyer never approved) put
+    // the actionable code in `details[].issue`, not in `name`/`message` —
+    // `name` is just the generic "UNPROCESSABLE_ENTITY" bucket. Extracting
+    // this is what lets a caller (BillingController::capture) recognize a
+    // specific issue like "ORDER_NOT_APPROVED" from the exception text and
+    // map it to a 4xx instead of a bare 500.
+    if (j.contains("details") && j["details"].is_array()) {
+        for (const auto& d : j["details"]) {
+            if (d.is_object() && d.contains("issue") && d["issue"].is_string()) {
+                if (!out.empty())
+                    out += " ";
+                out += "issue=" + d["issue"].get<std::string>();
+            }
+        }
+    }
 
     // Valid JSON, but none of the known fields — still surface something
     // rather than silently saying nothing.
@@ -376,7 +398,11 @@ public:
 
     /// POST /v2/checkout/orders/{order_id}/capture. Throws
     /// std::runtime_error on transport/non-2xx or a malformed response body
-    /// (see parse_capture_response).
+    /// (see parse_capture_response). PayPal answers 2xx for a capture that is
+    /// PENDING (e.g. an eCheck, or held for fraud review) or DECLINED, not
+    /// only for COMPLETED — this method does NOT interpret the returned
+    /// PayPalCapture::status itself; the caller MUST check it before
+    /// crediting anything (see BillingController::capture).
     virtual PayPalCapture capture_order(const std::string& order_id) {
         if (order_id.empty())
             throw std::runtime_error("paypal: capture_order: empty order_id");
@@ -455,7 +481,10 @@ public:
 
     /// Pure, no I/O — exposed for tests. Extracts the FIRST capture from
     /// purchase_units[0].payments.captures[0] of a PayPal v2 orders capture
-    /// response. Throws std::runtime_error on any missing/malformed field;
+    /// response, INCLUDING its `status` field verbatim (e.g. "COMPLETED",
+    /// "PENDING", "DECLINED" — see PayPalCapture's doc comment; this function
+    /// does not interpret it, only extracts it). Throws std::runtime_error on
+    /// any missing/malformed field, including a missing/non-string status;
     /// NEVER returns a zero-amount capture for a malformed body (a bug here
     /// would silently under-credit a wallet — see parse_decimal_to_cents).
     static PayPalCapture parse_capture_response(const std::string& json_body) {
@@ -483,11 +512,14 @@ public:
             !cap["amount"]["value"].is_string() || !cap["amount"].contains("currency_code") ||
             !cap["amount"]["currency_code"].is_string())
             throw std::runtime_error("paypal: capture response missing amount");
+        if (!cap.contains("status") || !cap["status"].is_string() || cap["status"].get<std::string>().empty())
+            throw std::runtime_error("paypal: capture response missing status");
 
         PayPalCapture out;
         out.capture_id = cap["id"].get<std::string>();
         out.currency = cap["amount"]["currency_code"].get<std::string>();
         out.amount_cents = detail::parse_decimal_to_cents(cap["amount"]["value"].get<std::string>());
+        out.status = cap["status"].get<std::string>();
         return out;
     }
 
