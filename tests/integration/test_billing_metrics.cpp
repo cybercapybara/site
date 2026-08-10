@@ -148,14 +148,20 @@ protected:
 
     /// Create a payment and drive it through Billing::credit_capture for
     /// real (so wallet_entries/wallet_balances end up exactly as a real
-    /// top-up would leave them), then backdate created_at.
+    /// top-up would leave them), then backdate created_at. @p credits_expected
+    /// defaults to a 1:1 ratio with @p amount_cents (matching the fixture's
+    /// credits_per_unit=100 rate); pass it explicitly to force a different
+    /// ratio — e.g. Wallet::refund_capture's `skipped_zero_credits` branch
+    /// needs a payment whose credits_expected/amount_cents ratio is small
+    /// enough that a legal (>0) refund amount floors to 0 credits.
     Domain::Payment seed_captured(const std::string& user_id,
                                   const std::string& order_id,
                                   std::int64_t amount_cents,
                                   const std::string& created_offset,
-                                  std::optional<std::string> package_id = std::nullopt) {
-        auto p = payments.create(
-            user_id, order_id, amount_cents, "USD", /*credits_expected=*/amount_cents, /*rate_snapshot=*/100, package_id);
+                                  std::optional<std::string> package_id = std::nullopt,
+                                  std::optional<std::int64_t> credits_expected = std::nullopt) {
+        const std::int64_t credits = credits_expected.value_or(amount_cents);
+        auto p = payments.create(user_id, order_id, amount_cents, "USD", credits, /*rate_snapshot=*/100, package_id);
         auto result = Billing::credit_capture(order_id, capture_id_for(order_id), amount_cents, "USD");
         EXPECT_TRUE(result.credited);
         backdate_payment(p.id, created_offset);
@@ -201,6 +207,17 @@ protected:
         auto result = Billing::refund_capture(capture_id_for(order_id), refund_id, refunded_amount_cents);
         EXPECT_TRUE(result.credited);
         backdate_refund(refund_id, created_offset);
+    }
+
+    /// `billing_refunds.outcome` for a given provider_refund_id — used to
+    /// confirm a seeding helper actually produced the outcome a test assumes
+    /// (e.g. `skipped_zero_credits`), rather than just trusting the arithmetic.
+    static std::string refund_outcome(const std::string& refund_id) {
+        return Database::get().execute_read([&](auto& txn) {
+            auto r = txn.exec_params("SELECT outcome FROM billing_refunds WHERE provider_refund_id = $1", refund_id);
+            EXPECT_EQ(r.size(), 1u);
+            return r.empty() ? std::string{} : r[0]["outcome"].template as<std::string>();
+        });
     }
 
     /// Drive the controller with ?period=@p period (omit the parameter
@@ -419,6 +436,49 @@ TEST_F(BillingMetricsApiTest, ZeroPaymentsInWindowGuardsDivisionByZero) {
     EXPECT_EQ(data["outstanding_value_cents"], 0);
     EXPECT_TRUE(data["top_packages"].empty());
     EXPECT_TRUE(data["top_users"].empty());
+}
+
+// Regression guard for the `outcome = 'applied'` filter in
+// BillingMetricsRepository's refunds query: every OTHER test here only ever
+// seeds applied refunds, so a filter wrongly widened to include skipped rows
+// would pass every one of them silently. This proves the filter actually
+// discriminates by outcome, not just that the number happens to be zero.
+TEST_F(BillingMetricsApiTest, RefundsExcludeSkippedOutcomesButIncludeApplied) {
+    auto admin = seed_admin();
+    auto alice = seed_user("alice-refunds@example.com");
+
+    // Applied: an ordinary 1:1 payment (credits_expected == amount_cents),
+    // refunded in full -> Wallet::refund_capture's outcome='applied' branch.
+    seed_captured(alice.subject, "ORDER-REFUND-APPLIED", 1000, "1 days");
+    seed_refund("ORDER-REFUND-APPLIED", "REFUND-APPLIED", 1000, "1 days");
+
+    // Skipped (skipped_zero_credits): credits_expected is deliberately tiny
+    // relative to amount_cents (1 credit for a 1000-cent payment), so
+    // Wallet::refund_capture's `credits_expected * refunded_amount_cents /
+    // amount_cents` conversion floors to 0 for ANY refund amount below the
+    // full 1000 cents — see that function's doc comment on the
+    // skipped_zero_credits branch. A 1-cent refund (the smallest legal
+    // amount; refund_capture requires > 0) floors (1*1)/1000 == 0, forcing
+    // this branch deterministically without needing to first spend down a
+    // balance (the skipped_insufficient alternative would).
+    seed_captured(
+        alice.subject, "ORDER-REFUND-SKIPPED", 1000, "1 days", /*package_id=*/std::nullopt, /*credits_expected=*/1);
+    seed_refund("ORDER-REFUND-SKIPPED", "REFUND-SKIPPED-ZERO", 1, "1 days");
+
+    // Confirm the seeding actually produced the outcomes this test assumes,
+    // not just that the metrics endpoint happens to report the right numbers.
+    ASSERT_EQ(refund_outcome("REFUND-APPLIED"), "applied");
+    ASSERT_EQ(refund_outcome("REFUND-SKIPPED-ZERO"), "skipped_zero_credits");
+
+    int status = 0;
+    auto body = call_metrics(admin, "week", &status);
+    ASSERT_EQ(status, k200OK);
+    const auto& data = body["data"];
+
+    // Only the applied refund may count — the skipped one must move neither
+    // figure, proving the filter discriminates rather than summing everything.
+    EXPECT_EQ(data["refunds_cents"], 1000);
+    EXPECT_EQ(data["refunds_count"], 1);
 }
 
 // ── module gate ──────────────────────────────────────────────────────────────
