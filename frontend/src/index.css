@@ -28,6 +28,10 @@
     --input: 240 6% 90%;
     --ring: 243 75% 59%;
     --radius: 0.375rem;
+    /* Chart series colors (dataviz skill palette, categorical slot 1 —
+       "blue"). Kept as raw hex, not hsl(var(--x)), so recharts can consume
+       them directly as `stroke`/`fill` values. */
+    --chart-revenue: #2a78d6;
   }
   .dark {
     /* zinc-950 / zinc-900 / zinc-800 neutrals */
@@ -51,6 +55,7 @@
     --border: 240 4% 16%;
     --input: 240 4% 16%;
     --ring: 239 84% 67%;
+    --chart-revenue: #3987e5;
   }
   * {
     @apply border-border;
