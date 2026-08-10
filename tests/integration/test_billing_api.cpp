@@ -404,6 +404,34 @@ TEST_F(BillingApiTest, TopupEnforcesMinMaxOnPackagePriceToo) {
     EXPECT_EQ(fake->create_order_calls, 0);
 }
 
+// resolve_topup_plan's credits_expected = amount_cents * rate / 100 floors
+// to 0 under integer division if an admin sets the rate low enough relative
+// to min_amount_cents — payments.credits_expected has a CHECK
+// (credits_expected > 0), and the PayPal order used to be created BEFORE
+// PaymentRepository::create ran into that constraint, orphaning a live
+// PayPal order behind a bare 500. The guard must reject with 400 before
+// create_order is ever called.
+TEST_F(BillingApiTest, TopupRejectsAmountThatFloorsToZeroCreditsBeforeCreatingOrder) {
+    auto user = seed_user("buyer-zero-credits@example.com");
+
+    // credits_per_unit=1 and min_amount_cents=1 means the smallest allowed
+    // topup (amount_cents=1) computes 1 * 1 / 100 == 0 credits — exactly the
+    // "admin rate x min amount floors to 0" scenario.
+    Repositories::BillingSettingsRepository settings;
+    settings.update(/*credits_per_unit=*/1, /*min_amount_cents=*/1, /*max_amount_cents=*/1000);
+
+    int status = 0;
+    auto body = do_topup(user, json{{"amount_cents", 1}}, &status);
+    EXPECT_EQ(status, k400BadRequest);
+    EXPECT_EQ(body["error"], "credits_too_small");
+    EXPECT_FALSE(body["message"].get<std::string>().empty());
+
+    // No live PayPal order was ever placed for a topup that can't satisfy
+    // payments.credits_expected's CHECK (credits_expected > 0) — the whole
+    // point of catching this before create_order, not after.
+    EXPECT_EQ(fake->create_order_calls, 0);
+}
+
 TEST_F(BillingApiTest, TopupIgnoresClientSuppliedCredits) {
     auto user = seed_user("buyer3@example.com");
     fake->next_order_id = "ORDER-IGNORE-CREDITS";

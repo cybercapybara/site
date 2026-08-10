@@ -616,6 +616,49 @@ TEST_F(WalletTest, LedgerSumEqualsCachedBalanceAfterMixedTraffic) {
     }
 }
 
+// Structural regression test for the lost-update fix in Wallet.hpp:
+// `SELECT ... FOR UPDATE` cannot lock a `wallet_balances` row that doesn't
+// exist yet, so a brand-new user's first pair of concurrent balance-changing
+// writes used to both read `current = 0` unlocked, and the second writer's
+// upsert would silently clobber the first's result — the cache disagreeing
+// with SUM(wallet_entries.delta_credits) even though the ledger itself
+// stayed correct (see the Wallet.hpp file comment for the full diagnosis).
+// A genuine multi-threaded race isn't this codebase's test convention (see
+// LedgerSumEqualsCachedBalanceAfterMixedTraffic above, which is sequential
+// too) and isn't required here — the fix is structural (materialize the row
+// before locking it, then a plain UPDATE instead of an upsert), so what
+// matters is exercising that exact path — starting from NO wallet_balances
+// row at all — and asserting the invariant holds afterward.
+TEST_F(WalletTest, LedgerSumEqualsCachedBalanceForNewUserAfterCreditThenAdjust) {
+    auto user_id = seed_user("new-user-race@example.com");
+    auto admin_id = seed_user("admin-race@example.com");
+
+    // Confirm there really is no wallet_balances row yet — the exact
+    // condition that used to make the first `SELECT ... FOR UPDATE` lock
+    // nothing.
+    auto has_row = Database::get().execute_read([&](auto& txn) {
+        auto r = txn.exec_params("SELECT 1 FROM wallet_balances WHERE user_id = $1", user_id);
+        return !r.empty();
+    });
+    ASSERT_FALSE(has_row);
+
+    seed_payment(user_id, "ORDER-NEW-1", 400, 400);
+    auto credit_result = Billing::credit_capture("ORDER-NEW-1", "CAP-NEW-1", 400, "USD");
+    ASSERT_TRUE(credit_result.credited);
+    EXPECT_EQ(credit_result.balance, 400);
+
+    auto adjust_result = Billing::adjust(user_id, 75, "welcome bonus", admin_id);
+    ASSERT_TRUE(adjust_result.credited);
+    EXPECT_EQ(adjust_result.balance, 475);
+
+    auto hist = Billing::history(user_id, 10, 0);
+    std::int64_t sum = 0;
+    for (const auto& e : hist)
+        sum += e.delta_credits;
+    EXPECT_EQ(sum, Billing::balance_of(user_id));
+    EXPECT_EQ(Billing::balance_of(user_id), 475);
+}
+
 // ── UserRepository::remove() vs. billing history (Task 1 review follow-up) ──
 
 TEST_F(WalletTest, DeletingUserWithWalletHistoryIsBlocked) {

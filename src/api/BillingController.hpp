@@ -707,6 +707,21 @@ private:
             out.credits_expected = (out.amount_cents * out.rate_snapshot) / 100;
         }
 
+        // Guard BEFORE the PayPal order is ever created (topup() calls
+        // create_order right after this returns true): integer division can
+        // floor a small-but-in-range amount_cents to 0 credits if an admin
+        // sets rate_snapshot (or a package's credits) low enough — e.g.
+        // min_amount_cents * credits_per_unit < 100. `payments.credits_expected`
+        // has a `CHECK (credits_expected > 0)`, so letting this through would
+        // create a live PayPal order and then hit that constraint on
+        // PaymentRepository::create as a bare 500 — with the order already
+        // placed at PayPal and nothing in our own DB pointing back at it (an
+        // orphan). Catching it here means the order is never created at all.
+        if (out.credits_expected <= 0) {
+            callback(ErrorResponse::bad_request("credits_too_small", "amount too small for the current rate"));
+            return false;
+        }
+
         if (out.amount_cents <= 0 || out.amount_cents < min_cents || out.amount_cents > max_cents) {
             const char* code = has_package ? "package_price_out_of_range" : "amount_out_of_range";
             callback(ErrorResponse::bad_request(
