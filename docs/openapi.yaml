@@ -457,6 +457,77 @@ components:
             balance:  { type: integer, format: int64, description: Wallet balance AFTER this adjustment }
             credited: { type: boolean, description: "false only if this exact adjustment somehow no-op'd (not expected in normal use — adjust() has no idempotency key)" }
 
+    # GET /api/v1/admin/billing/metrics. Mirrors AdminBillingController::metrics
+    # / BillingMetricsRepository::get. All money in integer cents, all credits
+    # integers — no floating point except conversion.rate.
+    BillingMetricsResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required:
+            - period
+            - revenue_cents
+            - payments_count
+            - avg_payment_cents
+            - conversion
+            - refunds_cents
+            - refunds_count
+            - outstanding_credits
+            - outstanding_value_cents
+            - series
+            - top_packages
+            - top_users
+          properties:
+            period:                   { type: string, enum: [day, week, month] }
+            revenue_cents:            { type: integer, format: int64, description: "Sum of amount_cents over captured payments in-window" }
+            payments_count:           { type: integer, format: int64, description: "Count of captured payments in-window" }
+            avg_payment_cents:        { type: integer, format: int64, description: "revenue_cents / payments_count (integer division; 0 if payments_count is 0)" }
+            conversion:
+              type: object
+              required: [created, captured, rate]
+              properties:
+                created:  { type: integer, format: int64, description: Every payment (any status) created in-window }
+                captured: { type: integer, format: int64, description: Of those, how many reached captured }
+                rate:     { type: number, format: double, description: "captured / created as a float ratio; 0 if created is 0" }
+            refunds_cents:            { type: integer, format: int64, description: "Sum of billing_refunds.amount_cents in-window, outcome='applied' only" }
+            refunds_count:            { type: integer, format: int64, description: "Count of billing_refunds rows in-window, outcome='applied' only" }
+            outstanding_credits:      { type: integer, format: int64, description: "SUM(wallet_balances.credits) — all-time liability, NOT windowed" }
+            outstanding_value_cents:  { type: integer, format: int64, description: "outstanding_credits * 100 / credits_per_unit (integer math, current billing_settings rate)" }
+            series:
+              type: array
+              description: "Calendar-bucketed (hourly for period=day, daily otherwise); every bucket in range is present, zero-filled if no captured payments landed in it"
+              items:
+                type: object
+                required: [bucket_start, revenue_cents, payments_count]
+                properties:
+                  bucket_start:    { type: string, description: ISO-8601 UTC bucket start }
+                  revenue_cents:   { type: integer, format: int64 }
+                  payments_count:  { type: integer, format: int64 }
+            top_packages:
+              type: array
+              description: "Top 5 packages by revenue among captured payments in-window"
+              items:
+                type: object
+                required: [package_id, title, revenue_cents, payments_count]
+                properties:
+                  package_id:      { type: string, format: uuid }
+                  title:           { type: string }
+                  revenue_cents:   { type: integer, format: int64 }
+                  payments_count:  { type: integer, format: int64 }
+            top_users:
+              type: array
+              description: "Top 5 users by top-up credits among captured payments in-window"
+              items:
+                type: object
+                required: [user_id, email, topup_credits, revenue_cents]
+                properties:
+                  user_id:         { type: string, format: uuid }
+                  email:           { type: string, format: email }
+                  topup_credits:   { type: integer, format: int64 }
+                  revenue_cents:   { type: integer, format: int64 }
+
 # -----------------------------------------------------------------------------
 paths:
   /:
@@ -1624,6 +1695,8 @@ paths:
         wallet_entries/wallet_balances. note is mandatory (non-empty);
         created_by on the resulting ledger row is always the authenticated
         admin's own id, never a client-supplied value. Writes an audit_log row.
+        When notify=true and the adjust + audit write both succeed, sends the
+        target user a best-effort email notice carrying note as the reason.
       tags: [admin, billing]
       security: [{ BearerAuth: [] }]
       parameters:
@@ -1638,6 +1711,7 @@ paths:
               properties:
                 delta_credits: { type: integer, format: int64, description: "Signed; positive credits, negative debits. Zero is refused (400)." }
                 note:          { type: string, minLength: 1, maxLength: 2000 }
+                notify:        { type: boolean, default: false, description: "If true, best-effort emails the target user a wallet-adjustment notice (reason = note) after the adjustment and its audit row have both been written." }
       responses:
         '200':
           description: Adjusted
@@ -1648,3 +1722,26 @@ paths:
         '403': { description: Not an admin }
         '404': { description: "Billing module disabled, or no such user" }
         '409': { description: A negative delta_credits would drive the balance below zero }
+  /api/v1/admin/billing/metrics:
+    get:
+      summary: Business metrics — revenue, conversion, refunds, outstanding liability, top lists (admin)
+      description: >
+        revenue/count/avg and conversion are computed over a rolling window
+        (now() - interval); refunds counts only billing_refunds rows with
+        outcome='applied'; outstanding_credits/outstanding_value_cents are an
+        all-time snapshot of wallet_balances, NOT windowed; series is
+        calendar-bucketed (hourly for period=day, daily for week/month) with
+        every bucket present (zero-filled, no gaps).
+      tags: [admin, billing]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { name: period, in: query, schema: { type: string, enum: [day, week, month], default: week }, description: "day = last 24h (hourly buckets), week = last 7d (daily buckets), month = last 30d (daily buckets)" }
+      responses:
+        '200':
+          description: Metrics snapshot
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BillingMetricsResponse' }
+        '400': { description: period is not one of day, week, month }
+        '403': { description: Not an admin }
+        '404': { description: Billing module disabled }

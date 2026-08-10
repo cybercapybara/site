@@ -40,6 +40,11 @@ jobs:
       - name: Regenerate OpenAPI TS schema
         working-directory: frontend
         run: |
+          # Sync package-lock.json to package.json first: a dependency added to
+          # package.json can't be installed locally (this repo builds only in
+          # CI), so its lockfile entry is materialized here rather than blocking
+          # the strict `npm ci` below. No-op when the lockfile is already in sync.
+          npm install --package-lock-only --no-audit --no-fund
           npm ci --no-audit --no-fund
           npm run gen:api
 

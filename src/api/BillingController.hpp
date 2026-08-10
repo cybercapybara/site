@@ -79,9 +79,13 @@
 #include "billing/Wallet.hpp"
 #include "core/Core.hpp"
 #include "domain/Billing.hpp"
+#include "domain/User.hpp"
+#include "email/BillingEmails.hpp"
 #include "repositories/BillingRepository.hpp"
+#include "repositories/UserRepository.hpp"
 #include "utils/Config.hpp"
 #include "utils/ErrorResponse.hpp"
+#include "utils/Time.hpp"
 
 namespace Api {
 
@@ -212,6 +216,12 @@ public:
         }
         const std::string order_id = body["order_id"].get<std::string>();
 
+        // Set ONLY on the credit_capture path below, inside the lambda —
+        // used to dispatch the receipt/failed email AFTER with_repo_errors
+        // returns (see the FIX round 1 note past the with_repo_errors call
+        // for why this can't safely happen inside the lambda).
+        std::optional<Billing::CreditResult> capture_result;
+
         with_repo_errors(callback, "billing capture", [&] {
             Repositories::PaymentRepository payments;
             // Read the PRIMARY: a capture attempted moments after topup (the
@@ -284,7 +294,31 @@ public:
             auto result = Billing::credit_capture(order_id, cap.capture_id, cap.amount_cents, cap.currency);
             callback(Response::ok(
                 {{"data", {{"credited", result.credited}, {"balance", result.balance}, {"status", "captured"}}}}));
+            // Stash for dispatch AFTER with_repo_errors returns — see below.
+            // Do NOT dispatch here: with_repo_errors' own catch would call
+            // callback() a SECOND time on an already-answered request if
+            // anything past this point ever threw (see FIX round 1).
+            capture_result = result;
         });
+
+        // Outside with_repo_errors' lambda entirely — the response has
+        // already been sent (or, on any early-return/error path above,
+        // capture_result is still empty and nothing is dispatched at all).
+        // A dispatch helper throwing here can no longer trigger a second
+        // callback() no matter what — with_repo_errors has already
+        // returned. `owned` (read inside the lambda, before the PayPal
+        // capture call) was already verified to be neither
+        // captured/failed/refunded, so was_failed_before=false is correct:
+        // any 'failed' status found now can only be a transition this call
+        // itself just caused (modulo the rare documented race with a
+        // concurrent webhook — see dispatchFailedEmailIfJustTransitioned's
+        // doc comment).
+        if (capture_result) {
+            if (capture_result->credited)
+                dispatchReceiptEmail(*capture_result);
+            else
+                dispatchFailedEmailIfJustTransitioned(*capture_result, /*was_failed_before=*/false);
+        }
     }
 
     // ── POST /api/v1/billing/paypal/webhook ─────────────────────────────────
@@ -397,6 +431,208 @@ public:
     }
 
 private:
+    // ── Billing email dispatch (Task 1) ─────────────────────────────────
+    // Every function below is called AFTER a Billing::* wallet call has
+    // already returned (credit_capture / refund_capture each fully commit
+    // their own transaction internally) — never from inside
+    // Database::execute_write. Every one of them is itself wrapped so a
+    // user-lookup failure, a missing payment row, or a template error can
+    // NEVER affect the credit/refund/failure that already committed; see
+    // BillingEmails.hpp's file comment for the same contract one level
+    // down. None of this touches Wallet.hpp — see that file's report for
+    // why CreditResult intentionally stays a 3-field struct.
+
+    /// Loads the user for an email dispatch. A missing user or a repo
+    /// failure is logged and treated as "skip this email", never thrown.
+    static std::optional<Domain::User> load_user_for_billing_email(const std::string& user_id) {
+        try {
+            Repositories::UserRepository users;
+            auto u = users.find(user_id);
+            if (!u)
+                spdlog::warn("billing email: user {} not found — skipping", user_id);
+            return u;
+        } catch (const std::exception& e) {
+            spdlog::warn("billing email: failed to load user {}: {}", user_id, e.what());
+            return std::nullopt;
+        }
+    }
+
+    /// The receipt's "package" line: the catalogue title if this payment
+    /// was a package purchase, else "Custom top-up" for a free-amount one
+    /// (payments.package_id is optional for exactly this reason — see
+    /// resolve_topup_plan).
+    static std::string package_title_for(const Domain::Payment& payment) {
+        if (!payment.package_id)
+            return "Custom top-up";
+        try {
+            Repositories::PackageRepository packages;
+            auto pkg = packages.find(*payment.package_id);
+            if (pkg)
+                return pkg->title;
+        } catch (const std::exception& e) {
+            spdlog::warn("billing email: failed to load package {} for title: {}", *payment.package_id, e.what());
+        }
+        return "Custom top-up";
+    }
+
+    static std::string now_iso8601() { return Utils::Time::epoch_to_iso8601(Utils::Time::now_epoch_seconds()); }
+
+    /**
+     * @brief Map `Wallet::credit_capture`'s INTERNAL `failure_reason` (e.g.
+     *        "amount mismatch: captured=500 expected=1000") to a short,
+     *        human sentence for the customer-facing failed-payment email.
+     *        Only what this email RENDERS is translated — `payments.
+     *        failure_reason` (DB, audit, admin payments list) keeps the
+     *        internal diagnostic string verbatim; nothing here touches
+     *        storage.
+     *
+     * credit_capture currently only ever writes an "amount mismatch" /
+     * "currency mismatch" reason (or both, "; "-joined — see that
+     * function's doc comment in Wallet.hpp), so both map to the same
+     * customer sentence; anything else (should be unreachable today, since
+     * that's the only internal reason producer, but defensive against a
+     * future new one) gets a generic fallback. Both keep the "you were not
+     * charged" reassurance — the internal strings never say that, and it's
+     * the one thing a customer reading a payment-failed email most needs to
+     * hear first.
+     */
+    static std::string friendly_failure_reason(const std::string& internal_reason) {
+        if (internal_reason.find("mismatch") != std::string::npos)
+            return "The payment amount didn't match your order, so it was declined. You were not charged.";
+        return "We couldn't verify your payment, so it was declined. You were not charged.";
+    }
+
+    /// Send the receipt for a payment that was JUST credited
+    /// (result.credited == true on the credit_capture call that produced
+    /// @p result). Loads the payment (for amount/currency/package) and the
+    /// user; best-effort throughout.
+    static void dispatchReceiptEmail(const Billing::CreditResult& result) {
+        try {
+            Repositories::PaymentRepository payments;
+            auto payment = payments.find(result.payment_id, /*from_primary=*/true);
+            if (!payment) {
+                spdlog::warn("billing email: payment {} not found for receipt", result.payment_id);
+                return;
+            }
+            auto user = load_user_for_billing_email(payment->user_id);
+            if (!user)
+                return;
+            Email::BillingEmails::receipt(*user,
+                                          package_title_for(*payment),
+                                          payment->amount_cents,
+                                          payment->currency,
+                                          payment->credits_expected,
+                                          result.balance,
+                                          payment->id,
+                                          now_iso8601());
+        } catch (const std::exception& e) {
+            spdlog::warn("billing email: failed to dispatch receipt for payment {}: {}", result.payment_id, e.what());
+        }
+    }
+
+    /**
+     * @brief Send the failed-payment email once, at the amount/currency-
+     *        mismatch transition credit_capture performs internally.
+     *
+     * credit_capture's CreditResult can't distinguish "this call just
+     * caused the failed transition" from "already known (captured/failed)
+     * before this call" — both return credited=false with the same shape.
+     * @p was_failed_before is the caller's own pre-call read of the
+     * payment's status, taken BEFORE the credit_capture call that produced
+     * @p result: if the payment was already 'failed', this call can't be
+     * the one that caused it, so nothing is sent (avoids a duplicate on a
+     * retry/redelivery). If it wasn't, and the payment is 'failed' now,
+     * this call caused it — send once.
+     *
+     * Known race (documented, not fixed — see Wallet.hpp's own
+     * KNOWN GAP notes for the same class of tradeoff): the return-flow
+     * capture() endpoint and a concurrent webhook delivery can both reach
+     * this point for the same order; each one's own @p was_failed_before
+     * was read before ITS credit_capture call, so both could read "not yet
+     * failed" and both send a failed email once the race resolves. This is
+     * a rare double-send, not a lost email, and not a money-safety issue —
+     * email delivery here is explicitly best-effort.
+     */
+    static void dispatchFailedEmailIfJustTransitioned(const Billing::CreditResult& result, bool was_failed_before) {
+        if (was_failed_before)
+            return;
+        try {
+            Repositories::PaymentRepository payments;
+            auto payment = payments.find(result.payment_id, /*from_primary=*/true);
+            if (!payment || payment->status != Domain::PaymentStatus::kFailed)
+                return;  // credited=false but not a failed transition (e.g. a concurrent duplicate) — nothing to send.
+            auto user = load_user_for_billing_email(payment->user_id);
+            if (!user)
+                return;
+            Email::BillingEmails::failed(
+                *user,
+                payment->amount_cents,
+                payment->currency,
+                friendly_failure_reason(payment->failure_reason.value_or("payment could not be verified")),
+                now_iso8601());
+        } catch (const std::exception& e) {
+            spdlog::warn("billing email: failed to dispatch failed-payment email for payment {}: {}",
+                         result.payment_id,
+                         e.what());
+        }
+    }
+
+    static std::string title_case_refund_kind(const std::string& kind_label) {
+        return kind_label == "reversal" ? "Reversal" : "Refund";
+    }
+
+    /// The wallet_entries row a refund_capture call wrote, if it actually
+    /// wrote one. refund_capture's CreditResult::credited is true both for
+    /// an "applied" refund AND a durably-recorded-but-skipped one
+    /// (insufficient balance / a sub-unit amount converting to 0 credits —
+    /// see Wallet.hpp's refund_capture docs) — the ledger itself is the
+    /// only place that distinguishes them, since a skipped attempt writes
+    /// no wallet_entries row at all. Small bounded scan (newest 10) of the
+    /// primary, run once right after the write.
+    static std::optional<Domain::WalletEntry> find_refund_ledger_entry(const std::string& user_id,
+                                                                       const std::string& provider_refund_id) {
+        for (const auto& e : Billing::history(user_id, /*limit=*/10, /*offset=*/0, /*from_primary=*/true)) {
+            if (e.kind == Domain::WalletEntryKind::kRefund && e.reference == provider_refund_id)
+                return e;
+        }
+        return std::nullopt;
+    }
+
+    /// Send the refund/reversal email ONLY when the refund actually debited
+    /// the wallet on THIS call — see find_refund_ledger_entry's doc comment
+    /// for why credited alone can't decide that.
+    static void dispatchRefundEmailIfApplied(const Billing::CreditResult& result,
+                                             const char* kind_label,
+                                             const std::string& provider_refund_id,
+                                             std::int64_t refunded_amount_cents,
+                                             const std::string& currency) {
+        if (!result.credited)
+            return;  // a redelivery of an already-seen refund id — never a new email.
+        try {
+            Repositories::PaymentRepository payments;
+            auto payment = payments.find(result.payment_id, /*from_primary=*/true);
+            if (!payment)
+                return;
+            auto entry = find_refund_ledger_entry(payment->user_id, provider_refund_id);
+            if (!entry)
+                return;  // durably recorded but skipped (insufficient balance / zero credits) — no debit happened.
+            auto user = load_user_for_billing_email(payment->user_id);
+            if (!user)
+                return;
+            Email::BillingEmails::refund(*user,
+                                         title_case_refund_kind(kind_label),
+                                         refunded_amount_cents,
+                                         currency,
+                                         /*credits_deducted=*/-entry->delta_credits,
+                                         result.balance,
+                                         payment->id,
+                                         now_iso8601());
+        } catch (const std::exception& e) {
+            spdlog::warn(
+                "billing email: failed to dispatch refund email for payment {}: {}", result.payment_id, e.what());
+        }
+    }
+
     // Case-insensitive per Drogon's HttpRequest::getHeader — collects only
     // the five paypal-* headers verify_webhook_signature actually reads
     // (PayPalClient::detail::find_header_ci does its own case-insensitive
@@ -478,6 +714,22 @@ private:
             return;
         }
 
+        // Read-only, best-effort: used ONLY to tell "this call just caused
+        // a failed transition" apart from "already failed before this
+        // call" for the failed-email dispatch below — see
+        // dispatchFailedEmailIfJustTransitioned's doc comment. A lookup
+        // failure here must never block the actual credit, so it defaults
+        // to the safe direction (assume already failed -> skip the email
+        // rather than risk a duplicate).
+        bool was_failed_before = true;
+        try {
+            Repositories::PaymentRepository pre_read;
+            auto existing = pre_read.find_by_order_id(order_id, /*from_primary=*/true);
+            was_failed_before = existing && existing->status == Domain::PaymentStatus::kFailed;
+        } catch (const std::exception& e) {
+            spdlog::warn("billing webhook: pre-read for email dispatch failed for order {}: {}", order_id, e.what());
+        }
+
         try {
             auto result = Billing::credit_capture(order_id, capture_id, amount_cents, currency);
             spdlog::info("billing webhook: capture {} order {} (event {}) — credited={} balance={}",
@@ -486,6 +738,12 @@ private:
                          event_id,
                          result.credited,
                          result.balance);
+            // Outside credit_capture's own (already-committed) transaction —
+            // see the class-level "Billing email dispatch" note above.
+            if (result.credited)
+                dispatchReceiptEmail(result);
+            else
+                dispatchFailedEmailIfJustTransitioned(result, was_failed_before);
         } catch (const std::exception& e) {
             // An unknown order id, a capture id already claimed by a
             // different order, or any other repository-layer anomaly: log
@@ -573,6 +831,11 @@ private:
                          event_id,
                          result.credited,
                          result.balance);
+            // Outside refund_capture's own (already-committed) transaction —
+            // see the class-level "Billing email dispatch" note above. Only
+            // sends when the ledger shows this call actually debited the
+            // wallet (see dispatchRefundEmailIfApplied's doc comment).
+            dispatchRefundEmailIfApplied(result, kind_label, refund_id, amount_cents, currency);
         } catch (const Repositories::ValidationError& e) {
             // InvalidRefundAmount: PayPal's own reported amount is out of
             // range, or pushes the cumulative refunded+reversed total for

@@ -6,11 +6,19 @@
  *        NEW top-up computes without touching an already-created payment's
  *        frozen snapshot — Task 2/4 behavior), the payments list filters,
  *        and manual wallet adjustments (mandatory note, audit trail,
- *        created_by attribution).
+ *        created_by attribution, and the optional `notify` adjustment-email
+ *        flag from the billing-emails-dashboard Task 2 brief).
+ *
+ * The `notify` cases observe email delivery the same way
+ * test_billing_emails.cpp does: jobs enabled + mail.enabled=false, so a
+ * dispatched BillingEmails::adjustment() shows up as exactly one
+ * "email.send" job on the Redis queue (Email::SendEmail::kJobType) —
+ * nothing here asserts against a real SMTP connection.
  */
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <drogon/HttpRequest.h>
 #include <gtest/gtest.h>
@@ -21,7 +29,10 @@
 #include "api/BillingController.hpp"
 #include "billing/PayPalClient.hpp"
 #include "billing/Wallet.hpp"
+#include "cache/Cache.hpp"
 #include "database/Database.hpp"
+#include "email/GenericEmail.hpp"
+#include "jobs/Jobs.hpp"
 #include "repositories/BillingRepository.hpp"
 #include "repositories/RoleRepository.hpp"
 #include "repositories/UserRepository.hpp"
@@ -91,6 +102,12 @@ protected:
         cfg["billing"]["credits_per_unit"] = 100;
         cfg["billing"]["min_amount_cents"] = 100;
         cfg["billing"]["max_amount_cents"] = 100000;
+        // Jobs on, mail off — same pattern test_billing_emails.cpp uses to
+        // observe adjustWallet's optional `notify` dispatch via the Redis
+        // queue instead of a real SMTP connection (see that file's config
+        // comment for why mail.enabled=false alone does NOT stop enqueueing).
+        cfg["jobs"]["enabled"] = true;
+        cfg["mail"]["enabled"] = false;
     }
 
     void SetUp() override {
@@ -112,6 +129,7 @@ protected:
                 "max_amount_cents = 100000 WHERE id = 1");
             return 0;
         });
+        drain_queue();
     }
 
     // billing_settings is a single, never-truncated row shared with every
@@ -122,6 +140,7 @@ protected:
     // whichever suite the test runner happens to execute next.
     void TearDown() override {
         if (!::testing::Test::IsSkipped()) {
+            drain_queue();
             Database::get().execute_write([](auto& txn) {
                 txn.exec(
                     "UPDATE billing_settings SET credits_per_unit = 100, min_amount_cents = 100, "
@@ -130,6 +149,27 @@ protected:
             });
         }
         TestHelpers::CoreBackedTest::TearDown();
+    }
+
+    static void drain_queue() { TestHelpers::drain_jobs({Email::SendEmail::kJobType}); }
+
+    static long queue_depth() {
+        return static_cast<long>(Cache::get().get_client().llen(Jobs::queue_key(Email::SendEmail::kJobType)));
+    }
+
+    // Reads the single job currently on the email.send queue and asserts
+    // there is exactly one — mirrors test_billing_emails.cpp's helper of the
+    // same name.
+    static json only_enqueued_email_job() {
+        auto& redis = Cache::get().get_client();
+        std::vector<std::string> ids;
+        redis.lrange(Jobs::queue_key(Email::SendEmail::kJobType), 0, -1, std::back_inserter(ids));
+        EXPECT_EQ(ids.size(), 1u);
+        if (ids.empty())
+            return json::object();
+        auto job = Jobs::get().get_status(ids[0]);
+        EXPECT_TRUE(job.has_value());
+        return job ? job->payload : json::object();
     }
 
     Security::Auth::AuthPrincipal seed_principal(const std::string& email, const std::string& role_name) {
@@ -470,6 +510,107 @@ TEST_F(AdminBillingApiTest, AdjustNegativeBeyondBalanceIsConflict) {
         target.subject);
     EXPECT_EQ(resp->statusCode(), k409Conflict);
     EXPECT_EQ(Billing::balance_of(target.subject), 0);
+}
+
+// ── manual adjustment: optional `notify` email (Task 2, billing-emails-dashboard) ──
+
+TEST_F(AdminBillingApiTest, AdjustNotifyTrueEnqueuesExactlyOneAdjustmentEmailWithReason) {
+    auto admin = seed_admin();
+    auto target = seed_user("notify-target@example.com");
+
+    HttpResponsePtr resp;
+    controller.adjustWallet(
+        TestHelpers::authed_json(admin, json{{"delta_credits", 250}, {"note", "welcome bonus"}, {"notify", true}}),
+        [&](const HttpResponsePtr& r) { resp = r; },
+        target.subject);
+    ASSERT_EQ(resp->statusCode(), k200OK);
+    auto body = json::parse(std::string(resp->body()));
+    EXPECT_EQ(body["data"]["balance"], 250);
+
+    // Audit row is still written regardless of notify.
+    EXPECT_EQ(audit_count("billing.wallet.adjust", target.subject), 1);
+
+    ASSERT_EQ(queue_depth(), 1);
+    auto payload = only_enqueued_email_job();
+    EXPECT_EQ(payload["to"], "notify-target@example.com");
+    EXPECT_EQ(payload["subject"], "Your wallet balance was adjusted");
+    // reason == the mandatory `note`, delta_credits rendered signed ("+250"),
+    // new_balance == Billing::CreditResult::balance from the adjust() call.
+    EXPECT_NE(payload["text"].get<std::string>().find("welcome bonus"), std::string::npos);
+    EXPECT_NE(payload["text"].get<std::string>().find("+250 credits"), std::string::npos);
+    EXPECT_NE(payload["text"].get<std::string>().find("New balance: 250 credits"), std::string::npos);
+}
+
+TEST_F(AdminBillingApiTest, AdjustNotifyTrueFormatsNegativeDeltaWithMinusSign) {
+    auto admin = seed_admin();
+    auto target = seed_user("notify-debit@example.com");
+
+    // Seed a starting balance to debit from (notify omitted — this call
+    // itself must not enqueue anything).
+    HttpResponsePtr seed_resp;
+    controller.adjustWallet(
+        TestHelpers::authed_json(admin, json{{"delta_credits", 500}, {"note", "seed"}}),
+        [&](const HttpResponsePtr& r) { seed_resp = r; },
+        target.subject);
+    ASSERT_EQ(seed_resp->statusCode(), k200OK);
+    ASSERT_EQ(queue_depth(), 0);
+
+    HttpResponsePtr resp;
+    controller.adjustWallet(
+        TestHelpers::authed_json(admin, json{{"delta_credits", -75}, {"note", "correction"}, {"notify", true}}),
+        [&](const HttpResponsePtr& r) { resp = r; },
+        target.subject);
+    ASSERT_EQ(resp->statusCode(), k200OK);
+
+    ASSERT_EQ(queue_depth(), 1);
+    auto payload = only_enqueued_email_job();
+    EXPECT_NE(payload["text"].get<std::string>().find("-75 credits"), std::string::npos);
+    EXPECT_NE(payload["text"].get<std::string>().find("New balance: 425 credits"), std::string::npos);
+    EXPECT_NE(payload["text"].get<std::string>().find("correction"), std::string::npos);
+}
+
+TEST_F(AdminBillingApiTest, AdjustNotifyFalseOrOmittedEnqueuesNoEmail) {
+    auto admin = seed_admin();
+    auto target = seed_user("no-notify@example.com");
+
+    HttpResponsePtr resp;
+
+    // notify omitted entirely -> defaults to false, no email.
+    controller.adjustWallet(
+        TestHelpers::authed_json(admin, json{{"delta_credits", 100}, {"note", "no notify field"}}),
+        [&](const HttpResponsePtr& r) { resp = r; },
+        target.subject);
+    ASSERT_EQ(resp->statusCode(), k200OK);
+    EXPECT_EQ(queue_depth(), 0);
+
+    // notify explicitly false -> still no email.
+    controller.adjustWallet(
+        TestHelpers::authed_json(admin, json{{"delta_credits", 50}, {"note", "explicit false"}, {"notify", false}}),
+        [&](const HttpResponsePtr& r) { resp = r; },
+        target.subject);
+    ASSERT_EQ(resp->statusCode(), k200OK);
+    EXPECT_EQ(queue_depth(), 0);
+
+    // Both adjustments still wrote their audit rows regardless of notify.
+    EXPECT_EQ(audit_count("billing.wallet.adjust", target.subject), 2);
+}
+
+TEST_F(AdminBillingApiTest, AdjustEmptyNoteStays400EvenWithNotifyTrue) {
+    auto admin = seed_admin();
+    auto target = seed_user("bad-note@example.com");
+
+    // notify=true must not bypass the mandatory-note validation — the 400
+    // happens before Billing::adjust (and therefore before any possible
+    // dispatch) is ever reached.
+    HttpResponsePtr resp;
+    controller.adjustWallet(
+        TestHelpers::authed_json(admin, json{{"delta_credits", 100}, {"note", ""}, {"notify", true}}),
+        [&](const HttpResponsePtr& r) { resp = r; },
+        target.subject);
+    EXPECT_EQ(resp->statusCode(), k400BadRequest);
+    EXPECT_EQ(Billing::balance_of(target.subject), 0);
+    EXPECT_EQ(audit_count("billing.wallet.adjust", target.subject), 0);
+    EXPECT_EQ(queue_depth(), 0);
 }
 
 // ── payments list ────────────────────────────────────────────────────────────

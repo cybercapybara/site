@@ -56,6 +56,10 @@ export const qk = {
         return ['admin', 'billing', 'payments', filter, page] as const;
       },
       settings: () => ['admin', 'billing', 'settings'] as const,
+      /** Overview-tab metrics snapshot. Keyed by period so switching the
+       * day/week/month toggle is a fresh cache entry (and a refetch). */
+      metrics: (period: 'day' | 'week' | 'month') =>
+        ['admin', 'billing', 'metrics', period] as const,
     },
   },
 } as const;

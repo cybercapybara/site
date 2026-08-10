@@ -1,0 +1,16 @@
+Dear {{ user.full_name }},
+
+Thanks for topping up your {{ app_name }} wallet! Here's your receipt.
+
+Package: {{ package_title }}
+Amount charged: {{ amount }} {{ currency }}
+Credits added: {{ credits }} credits
+New balance: {{ new_balance }} credits
+Payment ID: {{ payment_id }}
+Date: {{ date }}
+
+If you didn't make this purchase, please contact support right away.
+
+Sincerely,
+
+The {{ app_name }} Team

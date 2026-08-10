@@ -18,14 +18,16 @@ import { api } from '@/lib/api/client';
 import { qk } from '@/lib/api/queryKeys';
 import type { MessageResponse } from '@/lib/api/types';
 import { dollarsToCents, formatCents } from '@/lib/money';
+import { OverviewTab } from '@/pages/admin/billing/Overview';
 
 const PER_PAGE = 20;
 
 /**
- * Admin billing: packages CRUD, the rate/bounds settings, a payments table,
- * and a manual wallet adjustment dialog — the four things the /admin
- * dashboard's Billing tile leads to (see docs/superpowers/specs/
- * 2026-08-09-billing-paypal-design.md's Frontend section).
+ * Admin billing: the Overview metrics dashboard (default tab — see
+ * pages/admin/billing/Overview.tsx), packages CRUD, the rate/bounds
+ * settings, a payments table, and a manual wallet adjustment dialog (see
+ * docs/superpowers/specs/2026-08-09-billing-paypal-design.md's Frontend
+ * section).
  *
  * SCHEMA NOTE: docs/openapi.yaml has carried the admin billing schemas
  * (AdminPackage*, Payment, BillingSettings*, AdjustResponse) and paths
@@ -120,7 +122,7 @@ function fmtDate(iso: string): string {
 }
 
 export function AdminBillingPage() {
-  const [tab, setTab] = useState<'packages' | 'payments' | 'settings'>('packages');
+  const [tab, setTab] = useState<'overview' | 'packages' | 'payments' | 'settings'>('overview');
   const [adjusting, setAdjusting] = useState(false);
 
   return (
@@ -143,7 +145,7 @@ export function AdminBillingPage() {
       </div>
 
       <div className="flex gap-2 border-b">
-        {(['packages', 'payments', 'settings'] as const).map((t) => (
+        {(['overview', 'packages', 'payments', 'settings'] as const).map((t) => (
           <button
             key={t}
             className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px capitalize ${
@@ -158,6 +160,7 @@ export function AdminBillingPage() {
         ))}
       </div>
 
+      {tab === 'overview' && <OverviewTab />}
       {tab === 'packages' && <PackagesTab />}
       {tab === 'payments' && <PaymentsTab />}
       {tab === 'settings' && <SettingsTab />}

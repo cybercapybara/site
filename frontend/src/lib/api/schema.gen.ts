@@ -3217,7 +3217,7 @@ export interface paths {
         put?: never;
         /**
          * Manually adjust a user's wallet balance (admin)
-         * @description Routes through Billing::adjust — the only code allowed to write wallet_entries/wallet_balances. note is mandatory (non-empty); created_by on the resulting ledger row is always the authenticated admin's own id, never a client-supplied value. Writes an audit_log row.
+         * @description Routes through Billing::adjust — the only code allowed to write wallet_entries/wallet_balances. note is mandatory (non-empty); created_by on the resulting ledger row is always the authenticated admin's own id, never a client-supplied value. Writes an audit_log row. When notify=true and the adjust + audit write both succeed, sends the target user a best-effort email notice carrying note as the reason.
          */
         post: {
             parameters: {
@@ -3238,6 +3238,11 @@ export interface paths {
                          */
                         delta_credits: number;
                         note: string;
+                        /**
+                         * @description If true, best-effort emails the target user a wallet-adjustment notice (reason = note) after the adjustment and its audit row have both been written.
+                         * @default false
+                         */
+                        notify?: boolean;
                     };
                 };
             };
@@ -3281,6 +3286,69 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/billing/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Business metrics — revenue, conversion, refunds, outstanding liability, top lists (admin)
+         * @description revenue/count/avg and conversion are computed over a rolling window (now() - interval); refunds counts only billing_refunds rows with outcome='applied'; outstanding_credits/outstanding_value_cents are an all-time snapshot of wallet_balances, NOT windowed; series is calendar-bucketed (hourly for period=day, daily for week/month) with every bucket present (zero-filled, no gaps).
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description day = last 24h (hourly buckets), week = last 7d (daily buckets), month = last 30d (daily buckets) */
+                    period?: "day" | "week" | "month";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Metrics snapshot */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BillingMetricsResponse"];
+                    };
+                };
+                /** @description period is not one of day */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not an admin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Billing module disabled */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3581,6 +3649,94 @@ export interface components {
                 balance: number;
                 /** @description false only if this exact adjustment somehow no-op'd (not expected in normal use — adjust() has no idempotency key) */
                 credited: boolean;
+            };
+        };
+        BillingMetricsResponse: {
+            data: {
+                /** @enum {string} */
+                period: "day" | "week" | "month";
+                /**
+                 * Format: int64
+                 * @description Sum of amount_cents over captured payments in-window
+                 */
+                revenue_cents: number;
+                /**
+                 * Format: int64
+                 * @description Count of captured payments in-window
+                 */
+                payments_count: number;
+                /**
+                 * Format: int64
+                 * @description revenue_cents / payments_count (integer division; 0 if payments_count is 0)
+                 */
+                avg_payment_cents: number;
+                conversion: {
+                    /**
+                     * Format: int64
+                     * @description Every payment (any status) created in-window
+                     */
+                    created: number;
+                    /**
+                     * Format: int64
+                     * @description Of those
+                     */
+                    captured: number;
+                    /**
+                     * Format: double
+                     * @description captured / created as a float ratio; 0 if created is 0
+                     */
+                    rate: number;
+                };
+                /**
+                 * Format: int64
+                 * @description Sum of billing_refunds.amount_cents in-window, outcome='applied' only
+                 */
+                refunds_cents: number;
+                /**
+                 * Format: int64
+                 * @description Count of billing_refunds rows in-window, outcome='applied' only
+                 */
+                refunds_count: number;
+                /**
+                 * Format: int64
+                 * @description SUM(wallet_balances.credits) — all-time liability, NOT windowed
+                 */
+                outstanding_credits: number;
+                /**
+                 * Format: int64
+                 * @description outstanding_credits * 100 / credits_per_unit (integer math, current billing_settings rate)
+                 */
+                outstanding_value_cents: number;
+                /** @description Calendar-bucketed (hourly for period=day, daily otherwise); every bucket in range is present, zero-filled if no captured payments landed in it */
+                series: {
+                    /** @description ISO-8601 UTC bucket start */
+                    bucket_start: string;
+                    /** Format: int64 */
+                    revenue_cents: number;
+                    /** Format: int64 */
+                    payments_count: number;
+                }[];
+                /** @description Top 5 packages by revenue among captured payments in-window */
+                top_packages: {
+                    /** Format: uuid */
+                    package_id: string;
+                    title: string;
+                    /** Format: int64 */
+                    revenue_cents: number;
+                    /** Format: int64 */
+                    payments_count: number;
+                }[];
+                /** @description Top 5 users by top-up credits among captured payments in-window */
+                top_users: {
+                    /** Format: uuid */
+                    user_id: string;
+                    /** Format: email */
+                    email: string;
+                    /** Format: int64 */
+                    topup_credits: number;
+                    /** Format: int64 */
+                    revenue_cents: number;
+                }[];
             };
         };
     };

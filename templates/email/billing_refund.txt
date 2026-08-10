@@ -1,0 +1,15 @@
+Dear {{ user.full_name }},
+
+A {{ kind_label }} has been processed on your {{ app_name }} wallet.
+
+{{ kind_label }} amount: {{ amount }} {{ currency }}
+Credits removed: {{ credits_deducted }} credits
+New balance: {{ new_balance }} credits
+Payment ID: {{ payment_id }}
+Date: {{ date }}
+
+If you have any questions about this {{ kind_label }}, please contact support.
+
+Sincerely,
+
+The {{ app_name }} Team

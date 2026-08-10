@@ -15,6 +15,10 @@
  *     / wallet_balances directly. `note` must be non-empty (validated here;
  *     Billing::adjust itself does not enforce that) and `admin_id` is always
  *     the authenticated caller's own subject, never a client-supplied value.
+ *     Optional `notify` (bool, default false, Task 2) sends the target user
+ *     a best-effort Email::BillingEmails::adjustment() notice AFTER the
+ *     adjust + audit write both succeed — dispatched outside the handler's
+ *     with_repo_errors lambda, same pattern as BillingController::capture().
  *   - PUT .../settings changes the rate/bounds `billing_settings` row
  *     (migration 009) that BillingController::billing_limits() now reads.
  *     This can NEVER retroactively change an in-flight/already-created
@@ -32,6 +36,7 @@
 #include <string>
 
 #include <drogon/HttpController.h>
+#include <spdlog/spdlog.h>
 
 #include <nlohmann/json.hpp>
 
@@ -42,7 +47,11 @@
 #include "billing/Wallet.hpp"
 #include "core/Core.hpp"
 #include "domain/Billing.hpp"
+#include "domain/User.hpp"
+#include "email/BillingEmails.hpp"
+#include "repositories/BillingMetricsRepository.hpp"
 #include "repositories/BillingRepository.hpp"
+#include "repositories/UserRepository.hpp"
 #include "security/Audit.hpp"
 #include "security/Auth.hpp"
 #include "utils/ErrorResponse.hpp"
@@ -63,6 +72,7 @@ public:
     ADD_METHOD_TO(AdminBillingController::getSettings, "/api/v1/admin/billing/settings", Get);
     ADD_METHOD_TO(AdminBillingController::updateSettings, "/api/v1/admin/billing/settings", Put);
     ADD_METHOD_TO(AdminBillingController::adjustWallet, "/api/v1/admin/billing/users/{1}/adjust", Post);
+    ADD_METHOD_TO(AdminBillingController::metrics, "/api/v1/admin/billing/metrics", Get);
     METHOD_LIST_END
 
     // ── GET /api/v1/admin/billing/payments ──────────────────────────────────
@@ -328,6 +338,16 @@ public:
     // enforce that, so it's validated here before any DB write. `admin_id`
     // is always the authenticated caller's own subject — never taken from
     // the request body — so wallet_entries.created_by can't be spoofed.
+    // Optional `notify` (bool, default false, Task 2): when true and the
+    // adjust + audit write both succeed, sends the target user a best-effort
+    // Email::BillingEmails::adjustment() notice carrying `note` as the
+    // reason. Dispatch happens AFTER with_repo_errors(...) returns, entirely
+    // outside its lambda — mirrors BillingController::capture()'s
+    // capture_result stash (see that file's "FIX round 1" note): a dispatch
+    // helper throwing inside the lambda could otherwise trigger a second
+    // callback() on an already-answered request via with_repo_errors' own
+    // catch. Email dispatch itself is best-effort and NEVER throws into the
+    // money path — see BillingEmails.hpp's file comment.
     void adjustWallet(const HttpRequestPtr& req,
                       std::function<void(const HttpResponsePtr&)>&& callback,
                       const std::string& id) {
@@ -356,15 +376,116 @@ public:
         }
         const std::int64_t delta_credits = body["delta_credits"].get<std::int64_t>();
         const std::string note = body["note"].get<std::string>();
+        // Optional, default false — silently ignored if present but not a
+        // JSON boolean, same convention as updatePackage's `active` field
+        // above.
+        const bool notify = body.contains("notify") && body["notify"].is_boolean() && body["notify"].get<bool>();
 
         auto principal = Security::Auth::principal_of(req);
         const std::string admin_id = principal ? principal->subject : std::string{};
+
+        // Set ONLY when notify was requested AND Billing::adjust + the audit
+        // write both already succeeded — used to dispatch the adjustment
+        // email AFTER with_repo_errors returns (see the method doc comment
+        // above). Every earlier error path (validation, malformed id,
+        // ZeroAdjustment, InsufficientBalance, unknown user/admin) leaves
+        // this unset, so nothing dispatches for those.
+        std::optional<Billing::CreditResult> adjust_result;
 
         with_repo_errors(callback, "admin billing adjustWallet", [&] {
             auto result = Billing::adjust(id, delta_credits, note, admin_id);
             Security::Audit::record(
                 admin_id, "billing.wallet.adjust", "user", id, {{"delta_credits", delta_credits}, {"note", note}});
             callback(Response::ok({{"data", {{"balance", result.balance}, {"credited", result.credited}}}}));
+            if (notify)
+                adjust_result = result;
+        });
+
+        // Outside with_repo_errors' lambda entirely — the response has
+        // already been sent (or, on any early-return/error path above,
+        // adjust_result is still empty and nothing is dispatched at all). A
+        // dispatch-helper exception here can no longer trigger a second
+        // callback() no matter what — with_repo_errors has already returned.
+        if (adjust_result) {
+            auto user = load_user_for_adjustment_email(id);
+            if (user)
+                Email::BillingEmails::adjustment(*user, delta_credits, note, adjust_result->balance);
+        }
+    }
+
+    // ── GET /api/v1/admin/billing/metrics ───────────────────────────────────
+    // Business-metrics dashboard aggregate (Task 3, billing-emails-dashboard):
+    // revenue/count/avg (captured payments), conversion (captured vs created),
+    // applied refunds, the all-time outstanding wallet liability, a gap-free
+    // time series, and top packages/users — all in one read-only round trip.
+    // See BillingMetricsRepository.hpp for the exact SQL and window semantics.
+    void metrics(const HttpRequestPtr& req, std::function<void(const HttpResponsePtr&)>&& callback) {
+        if (!Core::billing_enabled()) {
+            callback(ErrorResponse::not_found("billing"));
+            return;
+        }
+        API_REQUIRE_ADMIN(req, callback);
+
+        // ?period=day|week|month, default week; anything else -> 400. Checked
+        // against a fixed allow-list BEFORE it ever reaches
+        // MetricsWindow::for_period / SQL, same discipline as every other
+        // client-supplied enum in this file (e.g. listPayments' ?status=).
+        std::string period = req->getParameter("period");
+        if (period.empty())
+            period = "week";
+        if (period != "day" && period != "week" && period != "month") {
+            callback(ErrorResponse::bad_request("invalid_period", "period must be one of: day, week, month"));
+            return;
+        }
+
+        with_repo_errors(callback, "admin billing metrics", [&] {
+            // Current rate, same source BillingController::billing_limits() uses
+            // for a live top-up — see BillingMetricsRepository.hpp's file doc
+            // comment for why the repository itself doesn't read billing_settings.
+            Repositories::BillingSettingsRepository settings_repo;
+            const auto settings = settings_repo.get();
+
+            Repositories::BillingMetricsRepository repo;
+            const auto w = Repositories::MetricsWindow::for_period(period);
+            auto m = repo.get(w, settings.credits_per_unit);
+
+            json series = json::array();
+            for (const auto& pt : m.series)
+                series.push_back({{"bucket_start", pt.bucket_start},
+                                  {"revenue_cents", pt.revenue_cents},
+                                  {"payments_count", pt.payments_count}});
+
+            json top_packages = json::array();
+            for (const auto& tp : m.top_packages)
+                top_packages.push_back({{"package_id", tp.package_id},
+                                        {"title", tp.title},
+                                        {"revenue_cents", tp.revenue_cents},
+                                        {"payments_count", tp.payments_count}});
+
+            json top_users = json::array();
+            for (const auto& tu : m.top_users)
+                top_users.push_back({{"user_id", tu.user_id},
+                                     {"email", tu.email},
+                                     {"topup_credits", tu.topup_credits},
+                                     {"revenue_cents", tu.revenue_cents}});
+
+            json conversion = {
+                {"created", m.conversion_created}, {"captured", m.conversion_captured}, {"rate", m.conversion_rate}};
+
+            json data = {{"period", period},
+                         {"revenue_cents", m.revenue_cents},
+                         {"payments_count", m.payments_count},
+                         {"avg_payment_cents", m.avg_payment_cents},
+                         {"conversion", conversion},
+                         {"refunds_cents", m.refunds_cents},
+                         {"refunds_count", m.refunds_count},
+                         {"outstanding_credits", m.outstanding_credits},
+                         {"outstanding_value_cents", m.outstanding_value_cents},
+                         {"series", series},
+                         {"top_packages", top_packages},
+                         {"top_users", top_users}};
+
+            callback(Response::ok({{"data", data}}));
         });
     }
 
@@ -373,6 +494,23 @@ private:
     static std::string actor_of(const HttpRequestPtr& req) {
         auto p = Security::Auth::principal_of(req);
         return p ? p->subject : std::string{};
+    }
+
+    /// Loads the target user for the optional adjustment-notice email. A
+    /// missing user or a repo failure is logged and treated as "skip this
+    /// email" — mirrors BillingController::load_user_for_billing_email;
+    /// never throws into the money path.
+    static std::optional<Domain::User> load_user_for_adjustment_email(const std::string& user_id) {
+        try {
+            Repositories::UserRepository users;
+            auto u = users.find(user_id);
+            if (!u)
+                spdlog::warn("billing email: user {} not found for adjustment notice — skipping", user_id);
+            return u;
+        } catch (const std::exception& e) {
+            spdlog::warn("billing email: failed to load user {} for adjustment notice: {}", user_id, e.what());
+            return std::nullopt;
+        }
     }
 };
 

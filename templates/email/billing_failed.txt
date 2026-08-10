@@ -1,0 +1,15 @@
+Dear {{ user.full_name }},
+
+We were unable to complete a payment on your {{ app_name }} wallet.
+
+You were not charged. No credits were added and no money left your account.
+
+Attempted amount: {{ amount }} {{ currency }}
+Reason: {{ reason }}
+Date: {{ date }}
+
+If you'd like to try again, you can start a new top-up from your account page at any time.
+
+Sincerely,
+
+The {{ app_name }} Team
