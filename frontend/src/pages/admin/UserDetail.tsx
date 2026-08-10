@@ -16,12 +16,14 @@ import { useMe } from '@/hooks/useMe';
 import { api } from '@/lib/api/client';
 import { qk } from '@/lib/api/queryKeys';
 import type { UserDetailResponse } from '@/lib/api/types';
+import { AdjustDialog } from '@/pages/admin/billing/AdjustDialog';
 
 export function AdminUserDetailPage() {
   const { id = '' } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const toast = useToast();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [adjusting, setAdjusting] = useState(false);
   // Query-backed via the TanStack Query cache: the cache is empty for one
   // paint after a hard reload, which would briefly disable the
   // self-protection UI.
@@ -123,6 +125,20 @@ export function AdminUserDetailPage() {
       </Card>
       <Card>
         <CardHeader>
+          <CardTitle>Wallet</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <p className="text-sm text-muted-foreground">
+            Manually credit or debit this user&apos;s wallet. The reason is recorded in the audit
+            log; optionally email the user.
+          </p>
+          <Button variant="outline" onClick={() => setAdjusting(true)}>
+            Adjust balance
+          </Button>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
           <CardTitle className="text-destructive">Danger zone</CardTitle>
         </CardHeader>
         <CardContent>
@@ -145,6 +161,13 @@ export function AdminUserDetailPage() {
           busy={remove.isPending}
           onConfirm={() => remove.mutate()}
           onClose={() => setConfirmDelete(false)}
+        />
+      )}
+      {adjusting && (
+        <AdjustDialog
+          initialUserId={user.id}
+          userLabel={user.email}
+          onClose={() => setAdjusting(false)}
         />
       )}
     </div>

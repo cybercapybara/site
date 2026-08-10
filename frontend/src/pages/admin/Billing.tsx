@@ -18,6 +18,7 @@ import { api } from '@/lib/api/client';
 import { qk } from '@/lib/api/queryKeys';
 import type { MessageResponse } from '@/lib/api/types';
 import { dollarsToCents, formatCents } from '@/lib/money';
+import { AdjustDialog } from '@/pages/admin/billing/AdjustDialog';
 import { OverviewTab } from '@/pages/admin/billing/Overview';
 
 const PER_PAGE = 20;
@@ -86,10 +87,6 @@ interface AdminBillingSettings {
 interface AdminBillingSettingsResponse {
   data: AdminBillingSettings;
 }
-interface AdminAdjustResponse {
-  data: { balance: number; credited: boolean };
-}
-
 const PAYMENT_STATUS_STYLES: Record<AdminPayment['status'], string> = {
   created:
     'border-slate-300 bg-slate-50 text-slate-700 dark:border-slate-500/30 dark:bg-slate-500/10 dark:text-slate-300',
@@ -597,100 +594,3 @@ function SettingsForm({
   );
 }
 
-// ── Manual adjustment ───────────────────────────────────────────────────
-
-function AdjustDialog({ onClose }: { onClose: () => void }) {
-  const toast = useToast();
-  const [userId, setUserId] = useState('');
-  const [delta, setDelta] = useState('');
-  const [note, setNote] = useState('');
-
-  const adjust = useApiMutation(
-    (vars: { userId: string; delta_credits: number; note: string }) =>
-      api.postJson<AdminAdjustResponse>(`/api/v1/admin/billing/users/${vars.userId}/adjust`, {
-        body: { delta_credits: vars.delta_credits, note: vars.note },
-      }),
-    {
-      invalidate: [qk.admin.billing.payments()],
-      onSuccess: (res) => {
-        toast.success(`Adjusted. New balance: ${res.data.balance.toLocaleString()} credits.`);
-        onClose();
-      },
-    },
-  );
-  useErrorToast(adjust.error);
-
-  const deltaNum = parseInt(delta, 10);
-  const deltaValid = /^-?\d+$/.test(delta) && deltaNum !== 0;
-  const uuidValid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
-  const noteValid = note.trim().length > 0;
-
-  const handleSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    if (!deltaValid || !uuidValid || !noteValid) return;
-    adjust.mutate({ userId, delta_credits: deltaNum, note: note.trim() });
-  };
-
-  return (
-    <Modal onClose={onClose} className="max-w-md">
-      <Card>
-        <CardHeader>
-          <CardTitle>Adjust balance</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-1">
-              <Label htmlFor="adjust-user">User ID</Label>
-              <Input
-                id="adjust-user"
-                className="font-mono text-xs"
-                placeholder="uuid — see /admin/users"
-                value={userId}
-                onChange={(e) => setUserId(e.target.value.trim())}
-              />
-              {!uuidValid && userId !== '' && (
-                <p className="text-xs text-destructive">Not a valid user id.</p>
-              )}
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="adjust-delta">Delta credits (signed; negative debits)</Label>
-              <Input
-                id="adjust-delta"
-                inputMode="numeric"
-                placeholder="e.g. 100 or -50"
-                value={delta}
-                onChange={(e) => setDelta(e.target.value)}
-              />
-              {!deltaValid && delta !== '' && (
-                <p className="text-xs text-destructive">
-                  Enter a non-zero whole number (negative to debit).
-                </p>
-              )}
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="adjust-note">Note</Label>
-              <Input
-                id="adjust-note"
-                required
-                maxLength={2000}
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-              />
-            </div>
-            <div className="flex gap-2">
-              <Button
-                type="submit"
-                disabled={adjust.isPending || !deltaValid || !uuidValid || !noteValid}
-              >
-                {adjust.isPending ? 'Adjusting…' : 'Adjust'}
-              </Button>
-              <Button type="button" variant="ghost" onClick={onClose}>
-                Cancel
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
-    </Modal>
-  );
-}
