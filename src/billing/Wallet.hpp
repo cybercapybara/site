@@ -561,8 +561,7 @@ inline CreditResult refund_capture(const std::string& provider_capture_id,
         // current=0 unlocked and the second silently clobber the first).
         // `DO NOTHING` is safe: only existence matters here, not the value.
         txn.exec_params(
-            "INSERT INTO wallet_balances (user_id, credits) VALUES ($1, 0) ON CONFLICT (user_id) DO NOTHING",
-            user_id);
+            "INSERT INTO wallet_balances (user_id, credits) VALUES ($1, 0) ON CONFLICT (user_id) DO NOTHING", user_id);
 
         // Lock the balance row (now guaranteed to exist) ONCE, up front,
         // whatever the outcome turns out to be — its value seeds the
