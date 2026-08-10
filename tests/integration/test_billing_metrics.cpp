@@ -336,6 +336,15 @@ TEST_F(BillingMetricsApiTest, DaySeriesIsGapFreeWithZeroBucketsRendered) {
 
 // ── the full aggregate math ──────────────────────────────────────────────────
 
+// Note on the `status IN ('captured', 'refunded')` filter (Finding 1,
+// post-review fix round): none of the payments below ever reach a
+// CUMULATIVE refund total equal to their own amount_cents (p2's refund is a
+// 500-of-2000 partial; p6's is a 1000-of-5000 partial, and p6 is outside
+// the window regardless), so none of them transition to status='refunded'
+// — every number in this test is unaffected by widening the filter from
+// `status = 'captured'`. See
+// FullyRefundedPaymentStillCountsInRevenueConversionAndTopLists below for
+// the dedicated full-refund regression.
 TEST_F(BillingMetricsApiTest, WeekMetricsMathIsCorrect) {
     auto admin = seed_admin();
     auto alice = seed_user("alice@example.com");
@@ -453,6 +462,13 @@ TEST_F(BillingMetricsApiTest, ZeroPaymentsInWindowGuardsDivisionByZero) {
 // seeds applied refunds, so a filter wrongly widened to include skipped rows
 // would pass every one of them silently. This proves the filter actually
 // discriminates by outcome, not just that the number happens to be zero.
+// Note: ORDER-REFUND-APPLIED below is refunded IN FULL, so it also flips to
+// status='refunded' (Wallet::refund_capture, step 5) — but this test only
+// asserts refunds_cents/refunds_count (unaffected by the payments.status
+// filter change, since the refunds query filters on billing_refunds.outcome,
+// not payments.status), so it needed no update for Finding 1's fix. See
+// FullyRefundedPaymentStillCountsInRevenueConversionAndTopLists below for
+// the dedicated assertion that a full refund stays in revenue/conversion.
 TEST_F(BillingMetricsApiTest, RefundsExcludeSkippedOutcomesButIncludeApplied) {
     auto admin = seed_admin();
     auto alice = seed_user("alice-refunds@example.com");
@@ -489,6 +505,73 @@ TEST_F(BillingMetricsApiTest, RefundsExcludeSkippedOutcomesButIncludeApplied) {
     // figure, proving the filter discriminates rather than summing everything.
     EXPECT_EQ(data["refunds_cents"], 1000);
     EXPECT_EQ(data["refunds_count"], 1);
+}
+
+// Regression guard for Finding 1 (post-review fix round): a FULLY refunded
+// payment flips `payments.status` from 'captured' to 'refunded' once the
+// CUMULATIVE refunded total reaches the full `amount_cents`
+// (`Wallet::refund_capture`, step 5 — see Wallet.hpp's doc comment). Before
+// this fix, revenue/count/avg, conversion.captured, series, top_packages,
+// and top_users all filtered on `status = 'captured'` alone, so a fully
+// refunded (or fully charged-back) payment silently dropped out of every
+// one of those WHILE still being subtracted via refunds_cents — double-
+// penalizing it, and inconsistent with a PARTIAL refund (which stays
+// 'captured' and stays fully in revenue, as WeekMetricsMathIsCorrect above
+// proves). `status IN ('captured', 'refunded')` fixes this: "successfully
+// captured at checkout" is the base for gross revenue/conversion/top-lists,
+// and refunds_cents/refunds_count remain the one, separate deduction line.
+TEST_F(BillingMetricsApiTest, FullyRefundedPaymentStillCountsInRevenueConversionAndTopLists) {
+    auto admin = seed_admin();
+    auto alice = seed_user("alice-full-refund@example.com");
+    auto pkg = seed_package("FullRefundPkg");
+
+    auto payment = seed_captured(alice.subject, "ORDER-FULL-REFUND", 1200, "1 days", pkg.id);
+    // Refund the ENTIRE amount in one call -> cumulative_total == amount_cents
+    // -> Wallet::refund_capture flips payments.status to 'refunded'.
+    seed_refund("ORDER-FULL-REFUND", "REFUND-FULL", 1200, "1 days");
+
+    // Confirm the seeding actually produced the status transition this test
+    // assumes, not just that the metrics endpoint happens to report the
+    // hoped-for numbers.
+    auto reloaded = payments.find(payment.id);
+    ASSERT_TRUE(reloaded.has_value());
+    ASSERT_EQ(reloaded->status, "refunded");
+    ASSERT_EQ(refund_outcome("REFUND-FULL"), "applied");
+
+    int status = 0;
+    auto body = call_metrics(admin, "week", &status);
+    ASSERT_EQ(status, k200OK);
+    const auto& data = body["data"];
+
+    // Still counts toward gross revenue/count/avg — a full refund does NOT
+    // remove the payment from "money that was successfully captured".
+    EXPECT_EQ(data["revenue_cents"], 1200);
+    EXPECT_EQ(data["payments_count"], 1);
+    EXPECT_EQ(data["avg_payment_cents"], 1200);
+
+    // Still counts as a successful checkout for conversion — a refund is a
+    // post-checkout event, not evidence checkout itself failed.
+    EXPECT_EQ(data["conversion"]["created"], 1);
+    EXPECT_EQ(data["conversion"]["captured"], 1);
+    EXPECT_DOUBLE_EQ(data["conversion"]["rate"].get<double>(), 1.0);
+
+    // AND appears in the separate refunds deduction line — gross revenue
+    // minus refunds is how a caller reads net, exactly as for a partial one.
+    EXPECT_EQ(data["refunds_cents"], 1200);
+    EXPECT_EQ(data["refunds_count"], 1);
+
+    // The same status-filter change applies to top_packages/top_users.
+    const auto& top_packages = data["top_packages"];
+    ASSERT_EQ(top_packages.size(), 1u);
+    EXPECT_EQ(top_packages[0]["package_id"], pkg.id);
+    EXPECT_EQ(top_packages[0]["revenue_cents"], 1200);
+    EXPECT_EQ(top_packages[0]["payments_count"], 1);
+
+    const auto& top_users = data["top_users"];
+    ASSERT_EQ(top_users.size(), 1u);
+    EXPECT_EQ(top_users[0]["user_id"], alice.subject);
+    EXPECT_EQ(top_users[0]["revenue_cents"], 1200);
+    EXPECT_EQ(top_users[0]["topup_credits"], 1200);
 }
 
 // ── module gate ──────────────────────────────────────────────────────────────

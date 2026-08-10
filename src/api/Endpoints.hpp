@@ -91,9 +91,7 @@ inline const std::vector<EndpointInfo>& get_endpoints() {
         {"GET", "/api/v1/admin/billing/settings", "Admin: read the billing rate/bounds settings"},
         {"PUT", "/api/v1/admin/billing/settings", "Admin: update the billing rate/bounds settings"},
         {"POST", "/api/v1/admin/billing/users/{id}/adjust", "Admin: manually adjust a user's wallet balance"},
-        {"GET",
-         "/api/v1/admin/billing/metrics",
-         "Admin: business metrics (revenue, conversion, refunds, liability, top lists)"},
+        {"GET", "/api/v1/admin/billing/metrics", "Admin: billing metrics (revenue, conversion, refunds)"},
     };
     return endpoints;
 }

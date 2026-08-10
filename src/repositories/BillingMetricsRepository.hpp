@@ -23,6 +23,28 @@
  *     event stream, so "outstanding as of now" is the only meaningful
  *     reading.
  *
+ * "Ever captured money" vs "captured only": revenue/count/avg,
+ * conversion_captured, the series bucketing, and top_packages/top_users all
+ * filter on `status IN ('captured', 'refunded')`, NOT `status = 'captured'`
+ * alone. `Wallet::refund_capture` flips a payment's status from `captured`
+ * to `refunded` once the CUMULATIVE refunded total reaches the full
+ * `amount_cents` (see migrations/007_billing.sql's status comment and
+ * Wallet.hpp's refund_capture doc, step 5) — a PARTIAL refund leaves
+ * `status = 'captured'` untouched. Filtering on `status = 'captured'` alone
+ * would therefore drop a fully-refunded (or fully charged-back —
+ * PAYMENT.CAPTURE.REVERSED drives the identical debit path, see
+ * BillingController::handleCaptureRefunded) payment out of gross
+ * revenue/conversion/top-lists entirely, while `refunds_cents` still counts
+ * its refund as a deduction — double-penalizing it (removed from gross AND
+ * shown as a refund) and inconsistent with a partial refund, which stays
+ * fully in gross. `status IN ('captured', 'refunded')` means "this payment's
+ * money was successfully captured at checkout, whatever happened
+ * afterward" — the correct base for gross revenue and for `conversion`
+ * (which an admin reads as "did checkout succeed", not "is it still
+ * unrefunded right now"). `refunds_cents`/`refunds_count` remain the single,
+ * separate deduction line — gross revenue minus refunds is the intended way
+ * to read net, exactly as it would be for a partial refund.
+ *
  * Money math: `outstanding_value_cents = outstanding_credits * 100 /
  * credits_per_unit` (integer division) — the exact inverse of how
  * BillingController::resolve_topup_plan computes `credits_expected =
@@ -128,19 +150,22 @@ public:
         return Database::get().execute_read([&](auto& txn) -> BillingMetrics {
             BillingMetrics m;
 
-            // ── revenue / count / avg (captured only, rolling window) ──────────
+            // ── revenue / count / avg (ever-captured, rolling window) ──────────
+            // status IN ('captured','refunded') — see file doc comment on why a
+            // fully-refunded payment must stay in gross revenue.
             auto rev = txn.exec_params(
                 "SELECT COALESCE(SUM(amount_cents), 0) AS revenue, COUNT(*) AS cnt "
                 "FROM payments "
-                "WHERE status = 'captured' AND created_at >= now() - $1::interval",
+                "WHERE status IN ('captured', 'refunded') AND created_at >= now() - $1::interval",
                 w.rolling_interval);
             m.revenue_cents = rev[0]["revenue"].template as<std::int64_t>();
             m.payments_count = rev[0]["cnt"].template as<std::int64_t>();
             m.avg_payment_cents = m.payments_count > 0 ? m.revenue_cents / m.payments_count : 0;
 
-            // ── conversion: captured vs every payment created in-window ────────
+            // ── conversion: ever-captured vs every payment created in-window ───
             auto conv = txn.exec_params(
-                "SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE status = 'captured') AS captured "
+                "SELECT COUNT(*) AS total, "
+                "       COUNT(*) FILTER (WHERE status IN ('captured', 'refunded')) AS captured "
                 "FROM payments "
                 "WHERE created_at >= now() - $1::interval",
                 w.rolling_interval);
@@ -183,7 +208,7 @@ public:
                 "     ) AS gs(bucket_start) "
                 "LEFT JOIN payments p "
                 "       ON date_trunc($1::text, p.created_at) = gs.bucket_start "
-                "      AND p.status = 'captured' "
+                "      AND p.status IN ('captured', 'refunded') "
                 "GROUP BY gs.bucket_start "
                 "ORDER BY gs.bucket_start",
                 w.bucket_field,
@@ -198,13 +223,13 @@ public:
                 m.series.push_back(std::move(pt));
             }
 
-            // ── top packages: captured payments in-window, by revenue ──────────
+            // ── top packages: ever-captured payments in-window, by revenue ─────
             auto pkg_rows = txn.exec_params(
                 "SELECT bp.id AS package_id, bp.title AS title, "
                 "       SUM(p.amount_cents) AS revenue, COUNT(*) AS cnt "
                 "FROM payments p "
                 "JOIN billing_packages bp ON bp.id = p.package_id "
-                "WHERE p.status = 'captured' AND p.created_at >= now() - $1::interval "
+                "WHERE p.status IN ('captured', 'refunded') AND p.created_at >= now() - $1::interval "
                 "GROUP BY bp.id, bp.title "
                 "ORDER BY revenue DESC "
                 "LIMIT 5",
@@ -219,13 +244,13 @@ public:
                 m.top_packages.push_back(std::move(tp));
             }
 
-            // ── top users: captured payments in-window, by top-up credits ──────
+            // ── top users: ever-captured payments in-window, by top-up credits ─
             auto user_rows = txn.exec_params(
                 "SELECT p.user_id AS user_id, u.email AS email, "
                 "       SUM(p.credits_expected) AS credits, SUM(p.amount_cents) AS revenue "
                 "FROM payments p "
                 "JOIN users u ON u.id = p.user_id "
-                "WHERE p.status = 'captured' AND p.created_at >= now() - $1::interval "
+                "WHERE p.status IN ('captured', 'refunded') AND p.created_at >= now() - $1::interval "
                 "GROUP BY p.user_id, u.email "
                 "ORDER BY credits DESC "
                 "LIMIT 5",
