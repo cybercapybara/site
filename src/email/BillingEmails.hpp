@@ -1,15 +1,16 @@
 /**
  * @file BillingEmails.hpp
  * @brief Best-effort transactional emails for the billing module: top-up
- *        receipts, refund/reversal notices, and failed-payment notices.
+ *        receipts, refund/reversal notices, failed-payment notices, and
+ *        (Task 2) admin wallet-adjustment notices.
  *
  * Routed through Email::SendEmail::send() (src/email/GenericEmail.hpp) — the
  * generic ad-hoc "email.send" job type, NOT a new job kind. Every public
- * function here (receipt/refund/failed, and Task 2's adjustment) wraps its
- * entire body in try/catch and NEVER throws: a template error, a missing
- * user, or a mail outage must never surface into money code. Callers
- * (BillingController) are required to dispatch these AFTER a Billing::*
- * wallet call has already returned — never from inside
+ * function here (receipt/refund/failed/adjustment) wraps its entire body in
+ * try/catch and NEVER throws: a template error, a missing user, or a mail
+ * outage must never surface into money code. Callers (BillingController /
+ * AdminBillingController) are required to dispatch these AFTER a
+ * Billing::* wallet call has already returned — never from inside
  * Database::execute_write. See BillingController.hpp's dispatch helpers for
  * how each call site decides WHETHER to send (the credited/applied/failed
  * dedupe logic lives there, not here — this file only renders and sends).
@@ -34,6 +35,7 @@
 #include "email/Templates.hpp"
 #include "utils/Config.hpp"
 #include "utils/Strings.hpp"
+#include "utils/Time.hpp"
 
 namespace Email::BillingEmails {
 
@@ -62,6 +64,26 @@ inline std::string format_cents(std::int64_t cents) {
     out += std::to_string(frac);
     return out;
 }
+
+/// delta_credits -> "+42" / "-7" — plain signed integer formatting for the
+/// admin adjustment notice. Unlike format_cents above, this is NOT a money
+/// amount (no /100 cents conversion) — delta_credits is already a plain
+/// credit count. std::to_string() already prepends '-' for a negative
+/// value, so only the positive case needs an explicit '+'; no double
+/// anywhere.
+inline std::string format_signed_credits(std::int64_t delta_credits) {
+    if (delta_credits >= 0)
+        return "+" + std::to_string(delta_credits);
+    return std::to_string(delta_credits);
+}
+
+/// Dispatch-time wall clock, ISO-8601 — the same choice receipt/refund/
+/// failed's caller (BillingController's dispatch helpers) makes for those
+/// emails (see Task 1 report, "Design decisions" #4). adjustment() has no
+/// stored historical timestamp to draw from at all (it's a live admin
+/// action), so this file computes it directly rather than taking it as a
+/// parameter.
+inline std::string now_iso8601() { return Utils::Time::epoch_to_iso8601(Utils::Time::now_epoch_seconds()); }
 
 /**
  * @brief Render + enqueue one billing email. NEVER throws — a render
@@ -167,6 +189,44 @@ inline void failed(const Domain::User& user,
         detail::send_rendered("billing_failed", "Your payment could not be completed", user, ctx);
     } catch (const std::exception& e) {
         spdlog::warn("BillingEmails::failed: failed for {}: {}", Utils::Strings::mask_email(user.email), e.what());
+    }
+}
+
+/**
+ * @brief Admin wallet-adjustment notice (Task 2). Callers must send this
+ *        ONLY when the admin explicitly opted in via the `notify` flag on
+ *        POST .../admin/billing/users/{id}/adjust AND Billing::adjust plus
+ *        its audit row have already both succeeded — Billing::adjust itself
+ *        has no notion of notification, so AdminBillingController::
+ *        adjustWallet decides whether to call this at all, after (not
+ *        inside) its with_repo_errors lambda, mirroring capture()'s
+ *        dispatch pattern in BillingController.hpp (see Task 1 report,
+ *        "Fix round 1").
+ *
+ * @param delta_credits Signed adjustment; rendered as "+250" / "-50" (see
+ *        detail::format_signed_credits) — plain integer formatting, no
+ *        double anywhere, matching this file's money-handling convention.
+ * @param reason The admin's mandatory `note` from the request, reused
+ *        verbatim as the notice's reason — adjustWallet has no separate
+ *        "reason" field.
+ * @param new_balance The wallet balance AFTER this adjustment
+ *        (Billing::CreditResult::balance from the adjust() call that
+ *        produced it).
+ */
+inline void adjustment(const Domain::User& user,
+                       std::int64_t delta_credits,
+                       const std::string& reason,
+                       std::int64_t new_balance) {
+    try {
+        json ctx;
+        ctx["delta_credits"] = detail::format_signed_credits(delta_credits);
+        ctx["reason"] = reason;
+        ctx["new_balance"] = new_balance;
+        ctx["date"] = detail::now_iso8601();
+        detail::send_rendered("billing_adjustment", "Your wallet balance was adjusted", user, ctx);
+    } catch (const std::exception& e) {
+        spdlog::warn(
+            "BillingEmails::adjustment: failed for {}: {}", Utils::Strings::mask_email(user.email), e.what());
     }
 }
 

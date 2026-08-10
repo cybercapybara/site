@@ -1,0 +1,14 @@
+Dear {{ user.full_name }},
+
+Your {{ app_name }} wallet balance has been adjusted by an administrator.
+
+Adjustment: {{ delta_credits }} credits
+Reason: {{ reason }}
+New balance: {{ new_balance }} credits
+Date: {{ date }}
+
+If you have any questions about this adjustment, please contact support.
+
+Sincerely,
+
+The {{ app_name }} Team
