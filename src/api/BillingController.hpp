@@ -477,6 +477,31 @@ private:
 
     static std::string now_iso8601() { return Utils::Time::epoch_to_iso8601(Utils::Time::now_epoch_seconds()); }
 
+    /**
+     * @brief Map `Wallet::credit_capture`'s INTERNAL `failure_reason` (e.g.
+     *        "amount mismatch: captured=500 expected=1000") to a short,
+     *        human sentence for the customer-facing failed-payment email.
+     *        Only what this email RENDERS is translated — `payments.
+     *        failure_reason` (DB, audit, admin payments list) keeps the
+     *        internal diagnostic string verbatim; nothing here touches
+     *        storage.
+     *
+     * credit_capture currently only ever writes an "amount mismatch" /
+     * "currency mismatch" reason (or both, "; "-joined — see that
+     * function's doc comment in Wallet.hpp), so both map to the same
+     * customer sentence; anything else (should be unreachable today, since
+     * that's the only internal reason producer, but defensive against a
+     * future new one) gets a generic fallback. Both keep the "you were not
+     * charged" reassurance — the internal strings never say that, and it's
+     * the one thing a customer reading a payment-failed email most needs to
+     * hear first.
+     */
+    static std::string friendly_failure_reason(const std::string& internal_reason) {
+        if (internal_reason.find("mismatch") != std::string::npos)
+            return "The payment amount didn't match your order, so it was declined. You were not charged.";
+        return "We couldn't verify your payment, so it was declined. You were not charged.";
+    }
+
     /// Send the receipt for a payment that was JUST credited
     /// (result.credited == true on the credit_capture call that produced
     /// @p result). Loads the payment (for amount/currency/package) and the
@@ -539,11 +564,12 @@ private:
             auto user = load_user_for_billing_email(payment->user_id);
             if (!user)
                 return;
-            Email::BillingEmails::failed(*user,
-                                         payment->amount_cents,
-                                         payment->currency,
-                                         payment->failure_reason.value_or("payment could not be verified"),
-                                         now_iso8601());
+            Email::BillingEmails::failed(
+                *user,
+                payment->amount_cents,
+                payment->currency,
+                friendly_failure_reason(payment->failure_reason.value_or("payment could not be verified")),
+                now_iso8601());
         } catch (const std::exception& e) {
             spdlog::warn("billing email: failed to dispatch failed-payment email for payment {}: {}",
                          result.payment_id,
