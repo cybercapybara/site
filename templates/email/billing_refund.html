@@ -1,0 +1,19 @@
+<p>Dear {{ user.full_name }},</p>
+
+<p>A {{ kind_label }} has been processed on your <b>{{ app_name }}</b> wallet.</p>
+
+<p>
+{{ kind_label }} amount: <b>{{ amount }} {{ currency }}</b><br>
+Credits removed: <b>{{ credits_deducted }} credits</b><br>
+New balance: <b>{{ new_balance }} credits</b><br>
+Payment ID: <code>{{ payment_id }}</code><br>
+Date: {{ date }}
+</p>
+
+<p>If you have any questions about this {{ kind_label }}, please contact support.</p>
+
+<p>Sincerely,</p>
+
+<p>The {{ app_name }} Team</p>
+
+<p><small>Note: replies to this address are not monitored.</small></p>

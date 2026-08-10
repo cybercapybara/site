@@ -1,0 +1,19 @@
+<p>Dear {{ user.full_name }},</p>
+
+<p>We were unable to complete a payment on your <b>{{ app_name }}</b> wallet.</p>
+
+<p><b>You were not charged.</b> No credits were added and no money left your account.</p>
+
+<p>
+Attempted amount: <b>{{ amount }} {{ currency }}</b><br>
+Reason: {{ reason }}<br>
+Date: {{ date }}
+</p>
+
+<p>If you'd like to try again, you can start a new top-up from your account page at any time.</p>
+
+<p>Sincerely,</p>
+
+<p>The {{ app_name }} Team</p>
+
+<p><small>Note: replies to this address are not monitored.</small></p>
