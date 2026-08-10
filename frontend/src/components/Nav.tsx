@@ -1,11 +1,14 @@
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { LogOut, Menu, Moon, Sun, X } from 'lucide-react';
+import { LogOut, Menu, Moon, Sun, Wallet, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { BRAND } from '@/lib/brand';
 import { useLogout } from '@/hooks/useAuthMutations';
 import { useMe } from '@/hooks/useMe';
+import { api } from '@/lib/api/client';
+import { qk } from '@/lib/api/queryKeys';
 import { cn } from '@/lib/utils';
 import { userCan } from '@/lib/auth/permissions';
 import { routes, guardPermission, type RouteEntry } from '@/routes/manifest';
@@ -17,6 +20,16 @@ export function Nav() {
   const navigate = useNavigate();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
+
+  // Compact balance indicator next to the username in the account cluster.
+  // Billing may be disabled (billing.enabled=false), in which case this
+  // 404s — that's expected, not an error to surface, so the indicator only
+  // renders on isSuccess.
+  const walletQ = useQuery({
+    queryKey: qk.billing.wallet(),
+    queryFn: () => api.getJson('/api/v1/billing/wallet', { query: { limit: 1 } }),
+    enabled: !!user,
+  });
 
   // Minimal theme toggle: the .dark class drives Tailwind's dark: variants; the
   // initial class is set pre-paint by the inline script in index.html.
@@ -112,6 +125,16 @@ export function Nav() {
                 >
                   {user.full_name || user.email}
                 </Link>
+                {walletQ.isSuccess && (
+                  <Link
+                    to="/billing"
+                    aria-label="Wallet balance"
+                    className="flex items-center gap-1 rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  >
+                    <Wallet className="h-3.5 w-3.5" />
+                    {walletQ.data.data.balance.toLocaleString()}
+                  </Link>
+                )}
                 <Button size="sm" variant="ghost" aria-label="Log out" onClick={logoutAndRedirect}>
                   <LogOut className="h-4 w-4" />
                 </Button>
@@ -178,6 +201,17 @@ export function Nav() {
                 >
                   {user.full_name || user.email}
                 </Link>
+                {walletQ.isSuccess && (
+                  <Link
+                    to="/billing"
+                    aria-label="Wallet balance"
+                    onClick={() => setMenuOpen(false)}
+                    className="flex items-center gap-2 rounded px-2 py-2 text-muted-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <Wallet className="h-4 w-4" />
+                    {walletQ.data.data.balance.toLocaleString()} credits
+                  </Link>
+                )}
                 <Button
                   variant="ghost"
                   className="justify-start px-2"
