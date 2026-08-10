@@ -165,6 +165,17 @@ protected:
                 "TRUNCATE TABLE wallet_entries, wallet_balances, billing_refunds, payments, billing_packages CASCADE");
             txn.exec("TRUNCATE TABLE users CASCADE");
             txn.exec("DELETE FROM roles WHERE name NOT IN ('User', 'Administrator')");
+            // billing_settings is seeded exactly once by migration 009 and is
+            // never truncated (its repository assumes the single row always
+            // exists) and is shared with every other billing suite in this
+            // binary (test_admin_billing_api.cpp mutates the same row via the
+            // same table) — reset it to the known defaults on the way in so a
+            // settings-mutating test elsewhere can't leak a non-default rate
+            // into this suite. See test_admin_billing_api.cpp's identical
+            // reset for the same reasoning from the other direction.
+            txn.exec(
+                "UPDATE billing_settings SET credits_per_unit = 100, min_amount_cents = 100, "
+                "max_amount_cents = 100000 WHERE id = 1");
             return 0;
         });
     }
@@ -173,6 +184,18 @@ protected:
         // Don't leak the fake client (or its state) into a later suite in the
         // same test binary — see PayPalClient.hpp's own test-discipline note.
         Billing::reset_for_testing();
+        if (!::testing::Test::IsSkipped()) {
+            // Mirror the SetUp reset on the way out too — this suite has its
+            // own settings-mutating test now (TopupRejectsAmountThatFloors...),
+            // and TearDown-side cleanup is what actually protects whichever
+            // test the runner executes next, in this file or another.
+            Database::get().execute_write([](auto& txn) {
+                txn.exec(
+                    "UPDATE billing_settings SET credits_per_unit = 100, min_amount_cents = 100, "
+                    "max_amount_cents = 100000 WHERE id = 1");
+                return 0;
+            });
+        }
         TestHelpers::CoreBackedTest::TearDown();
     }
 
