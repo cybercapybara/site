@@ -1,5 +1,14 @@
 import { Link } from 'react-router-dom';
-import { Users, UserPlus, Shield, ListChecks, ScrollText, FileText, Image } from 'lucide-react';
+import {
+  Users,
+  UserPlus,
+  Shield,
+  ListChecks,
+  ScrollText,
+  FileText,
+  Image,
+  Wallet,
+} from 'lucide-react';
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useMe } from '@/hooks/useMe';
@@ -66,6 +75,15 @@ export function AdminDashboardPage() {
               <Image className="h-6 w-6 mb-2 text-muted-foreground" />
               <CardTitle>Media</CardTitle>
               <CardDescription>Images uploaded from the post editor.</CardDescription>
+            </CardHeader>
+          </Card>
+        </Link>
+        <Link to="/admin/billing">
+          <Card className="hover:bg-accent transition-colors h-full">
+            <CardHeader>
+              <Wallet className="h-6 w-6 mb-2 text-muted-foreground" />
+              <CardTitle>Billing</CardTitle>
+              <CardDescription>Packages, rate/bounds, payments and wallet adjustments.</CardDescription>
             </CardHeader>
           </Card>
         </Link>

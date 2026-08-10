@@ -237,6 +237,226 @@ components:
       properties:
         message: { type: string }
 
+    # Mirrors Domain::to_json(Package) in src/domain/Billing.hpp.
+    BillingPackage:
+      type: object
+      required: [id, title, amount_cents, credits, active, sort, created_at, updated_at]
+      properties:
+        id:           { type: string, format: uuid }
+        title:        { type: string }
+        amount_cents: { type: integer, format: int64 }
+        credits:      { type: integer, format: int64 }
+        active:       { type: boolean }
+        sort:         { type: integer }
+        created_at:   { type: string }
+        updated_at:   { type: string }
+
+    # GET /api/v1/billing/packages also surfaces the current per-unit rate and
+    # the custom-amount bounds — Task 8's custom-amount input validates
+    # against these client-side, and a package's own price/credits ratio can
+    # legitimately differ from the generic rate (a bonus/discount package),
+    # so they aren't derivable from the package list alone.
+    BillingPackageListResponse:
+      type: object
+      required: [data, credits_per_unit, min_amount_cents, max_amount_cents]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/BillingPackage' }
+        credits_per_unit: { type: integer, format: int64, description: "billing.credits_per_unit — credits per 100 cents" }
+        min_amount_cents: { type: integer, format: int64, description: Minimum accepted amount_cents for a custom top-up }
+        max_amount_cents: { type: integer, format: int64, description: Maximum accepted amount_cents for a custom top-up }
+
+    # Mirrors Domain::to_json(WalletEntry) in src/domain/Billing.hpp — the
+    # full internal/admin shape, INCLUDING created_by. Not used by the
+    # user-facing GET /api/v1/billing/wallet response — see PublicWalletEntry.
+    WalletEntry:
+      type: object
+      required: [id, user_id, delta_credits, kind, reference, note, created_at]
+      properties:
+        id:            { type: string, format: uuid }
+        user_id:       { type: string, format: uuid }
+        delta_credits: { type: integer, format: int64 }
+        kind:          { type: string, enum: [topup, spend, adjustment, refund] }
+        reference:     { type: string }
+        note:          { type: string }
+        created_by:    { type: ['string', 'null'], format: uuid }
+        created_at:    { type: string }
+
+    # GET /api/v1/billing/wallet's ledger rows. Deliberately OMITS
+    # created_by (an admin's raw UUID on adjustment rows) — that's
+    # internal/admin-only information, not something an end user's own
+    # wallet view should ever leak. See BillingController::public_wallet_entry.
+    PublicWalletEntry:
+      type: object
+      required: [id, user_id, delta_credits, kind, reference, note, created_at]
+      properties:
+        id:            { type: string, format: uuid }
+        user_id:       { type: string, format: uuid }
+        delta_credits: { type: integer, format: int64 }
+        kind:          { type: string, enum: [topup, spend, adjustment, refund] }
+        reference:     { type: string }
+        note:          { type: string }
+        created_at:    { type: string }
+
+    # GET /api/v1/billing/wallet. Mirrors BillingController::getWallet.
+    WalletResponse:
+      type: object
+      required: [data, limit, offset]
+      properties:
+        data:
+          type: object
+          required: [balance, history]
+          properties:
+            balance: { type: integer, format: int64 }
+            history:
+              type: array
+              items: { $ref: '#/components/schemas/PublicWalletEntry' }
+        limit:  { type: integer }
+        offset: { type: integer }
+
+    # POST /api/v1/billing/topup. Mirrors BillingController::topup — the
+    # approve URL only; no credit count is ever present here.
+    TopupResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [order_id, approve_url]
+          properties:
+            order_id:    { type: string, description: PayPal order id — pass back to POST .../capture }
+            approve_url: { type: string, format: uri, description: Redirect the buyer here to approve the order on PayPal }
+
+    # POST /api/v1/billing/capture. Mirrors BillingController::capture.
+    CaptureResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [credited, balance, status]
+          properties:
+            credited: { type: boolean, description: "false on an idempotent replay, or when PayPal has not yet COMPLETED the capture" }
+            balance:  { type: integer, format: int64, description: Wallet balance AFTER this call (unchanged if not credited) }
+            status:
+              type: string
+              description: >
+                "captured" once this or an earlier call credited the wallet;
+                otherwise PayPal's own capture status verbatim (e.g.
+                "PENDING", "DECLINED") — PayPal answers 2xx for both, so this
+                is how a caller tells a settled capture from one still in
+                flight.
+            pending:
+              type: boolean
+              description: Present (true) only when PayPal's capture has not reached COMPLETED yet — the payment is left uncaptured for the webhook to resolve.
+
+    # POST /api/v1/billing/paypal/webhook. `handled` distinguishes "this event
+    # type applies real ledger logic" (PAYMENT.CAPTURE.COMPLETED/REFUNDED/
+    # REVERSED — see BillingController::handleCaptureRefunded's doc comment
+    # for why REVERSED shares REFUNDED's handling) from "acknowledged but
+    # deliberately not acted on" (an unrelated event type) — both answer 200
+    # either way, since PayPal retries any non-2xx for days.
+    WebhookAckResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [handled]
+          properties:
+            handled: { type: boolean, description: "true if this event type drives real crediting/refund logic (whether or not it was a no-op replay); false for an ignored/unrecognized event type" }
+
+    # GET/POST/PATCH /api/v1/admin/billing/packages[/{id}]. Same shape as the
+    # user-facing BillingPackage — the admin view just isn't filtered to
+    # active=true.
+    AdminPackageResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/BillingPackage' }
+
+    AdminPackageListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/BillingPackage' }
+
+    # GET /api/v1/admin/billing/payments. Mirrors Domain::to_json(Payment).
+    AdminPaymentListResponse:
+      type: object
+      required: [data, total, limit, offset]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Payment' }
+        total:  { type: integer }
+        limit:  { type: integer }
+        offset: { type: integer }
+
+    Payment:
+      type: object
+      required:
+        - id
+        - user_id
+        - provider
+        - provider_order_id
+        - amount_cents
+        - currency
+        - credits_expected
+        - rate_snapshot
+        - status
+        - created_at
+        - updated_at
+      properties:
+        id:                  { type: string, format: uuid }
+        user_id:             { type: string, format: uuid }
+        provider:             { type: string }
+        provider_order_id:    { type: string }
+        provider_capture_id:  { type: ['string', 'null'] }
+        amount_cents:         { type: integer, format: int64 }
+        currency:             { type: string }
+        credits_expected:     { type: integer, format: int64 }
+        rate_snapshot:        { type: integer, format: int64 }
+        package_id:           { type: ['string', 'null'], format: uuid }
+        status:               { type: string, enum: [created, approved, captured, failed, refunded] }
+        failure_reason:       { type: ['string', 'null'] }
+        created_at:           { type: string }
+        updated_at:           { type: string }
+
+    # GET/PUT /api/v1/admin/billing/settings. Mirrors Domain::to_json(BillingSettings).
+    BillingSettings:
+      type: object
+      required: [credits_per_unit, min_amount_cents, max_amount_cents, updated_at]
+      properties:
+        credits_per_unit: { type: integer, format: int64, description: Credits granted per 100 cents on a custom-amount top-up }
+        min_amount_cents: { type: integer, format: int64 }
+        max_amount_cents: { type: integer, format: int64 }
+        updated_at:       { type: string }
+
+    BillingSettingsResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/BillingSettings' }
+
+    # POST /api/v1/admin/billing/users/{id}/adjust. Mirrors
+    # AdminBillingController::adjustWallet — deliberately does NOT echo the
+    # ledger row's full shape (no reference/kind/note round-trip needed by a
+    # caller that already knows what it just sent).
+    AdjustResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [balance, credited]
+          properties:
+            balance:  { type: integer, format: int64, description: Wallet balance AFTER this adjustment }
+            credited: { type: boolean, description: "false only if this exact adjustment somehow no-op'd (not expected in normal use — adjust() has no idempotency key)" }
+
 # -----------------------------------------------------------------------------
 paths:
   /:
@@ -1101,3 +1321,330 @@ paths:
         '403': { description: Not an admin }
         '404': { description: "Content module disabled, or no such upload" }
         '503': { description: Storage backend not configured }
+
+  # ── Billing (user-facing wallet/PayPal top-up; require billing.enabled) ────
+  /api/v1/billing/packages:
+    get:
+      summary: List active top-up packages
+      description: >
+        Also returns the current per-unit rate (credits_per_unit) and the
+        custom-amount bounds (min_amount_cents/max_amount_cents) alongside
+        the package list — see BillingPackageListResponse.
+      tags: [billing]
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: Active packages (catalogue order) + the current rate/bounds
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BillingPackageListResponse' }
+        '401': { description: Not authenticated }
+        '404': { description: Billing module disabled }
+  /api/v1/billing/wallet:
+    get:
+      summary: Get your own wallet balance + ledger history
+      description: >
+        Always the authenticated caller's own wallet — no user-id parameter
+        of any kind is accepted, by design (see BillingController::getWallet).
+      tags: [billing]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { name: limit,  in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        '200':
+          description: Balance + ledger page, newest first
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WalletResponse' }
+        '401': { description: Not authenticated }
+        '404': { description: Billing module disabled }
+  /api/v1/billing/topup:
+    post:
+      summary: Start a PayPal top-up (package or custom amount)
+      description: >
+        Provide exactly one of package_id or amount_cents. Credits are always
+        computed server-side (package.credits, or amount_cents *
+        billing.credits_per_unit / 100) — any "credits" field in the body is
+        ignored entirely. The resulting amount_cents (a custom amount, OR a
+        package's own price) is bounded by billing.min_amount_cents /
+        billing.max_amount_cents in both cases.
+      tags: [billing]
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                package_id:   { type: string, format: uuid, description: "Mutually exclusive with amount_cents" }
+                amount_cents: { type: integer, format: int64, minimum: 1, description: "Mutually exclusive with package_id" }
+      responses:
+        '201':
+          description: PayPal order created — redirect the buyer to data.approve_url
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TopupResponse' }
+        '400': { description: "Neither/both of package_id+amount_cents given, the resulting amount out of [min,max] (amount_out_of_range or package_price_out_of_range), or malformed input" }
+        '401': { description: Not authenticated }
+        '404': { description: Billing module disabled, or package_id does not name an active package }
+        '409': { description: provider_order_id already recorded (PayPal order id collision) }
+  /api/v1/billing/capture:
+    post:
+      summary: Capture an approved PayPal order and credit your wallet
+      description: >
+        order_id must belong to the authenticated caller — verified via
+        PaymentRepository::find_owned before any capture is attempted, so one
+        user can never capture (and collect credits for) another user's
+        order. Idempotent: capturing an already-captured order returns
+        credited=false with the unchanged balance instead of calling PayPal
+        again. PayPal answers 2xx even for a PENDING or DECLINED capture —
+        the wallet is only ever credited when PayPal's own capture status is
+        COMPLETED; otherwise the payment is left uncaptured (for the webhook
+        to resolve later) and the response reports credited=false with the
+        real status.
+      tags: [billing]
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [order_id]
+              properties:
+                order_id: { type: string, description: PayPal order id, as returned by POST .../topup }
+      responses:
+        '200':
+          description: >
+            Captured, replayed idempotently, or still pending/declined on
+            PayPal's side — see CaptureResponse.status/pending to tell them apart.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaptureResponse' }
+        '400': { description: order_id missing or not a string }
+        '401': { description: Not authenticated }
+        '404': { description: "Billing module disabled, or no such order for this caller" }
+        '409': { description: "This payment is failed/refunded and cannot be captured (payment_not_capturable), or PayPal reports the order hasn't been approved yet (order_not_approved)" }
+  /api/v1/billing/paypal/webhook:
+    post:
+      summary: PayPal webhook — capture/refund notifications
+      description: >
+        PayPal-to-server only, not a browser request: public (no session) and
+        CSRF-exempt (PayPal never presents the session cookie the CSRF check
+        keys off), but every request is verified against PayPal's own
+        verify-webhook-signature API BEFORE the body is trusted, using the
+        paypal-auth-algo / paypal-cert-url / paypal-transmission-id /
+        paypal-transmission-sig / paypal-transmission-time headers PayPal
+        sends. Response codes intentionally do NOT follow the usual REST
+        mapping — PayPal retries any non-2xx delivery for days:
+          * PAYMENT.CAPTURE.COMPLETED credits the wallet (idempotent — a
+            capture already credited via POST .../capture, including one
+            that resolves a PENDING return-flow capture, is a 200 no-op).
+          * PAYMENT.CAPTURE.REFUNDED (merchant refund) and
+            PAYMENT.CAPTURE.REVERSED (PayPal claws back a capture —
+            chargeback/dispute/risk) both DEBIT the wallet via the same
+            Billing::refund_capture logic, keyed on the event's own id as
+            the idempotency marker — see BillingController::
+            handleCaptureRefunded's doc comment for why both event types
+            share one handler.
+          * Any other event type is acknowledged with 200 and NOT acted on.
+        200 is returned for every signature-valid event that was either
+        applied or safely no-op'd; a signature-valid event this handler
+        FAILED to process (a malformed body, or a refund/reversal it
+        couldn't resolve/apply) answers 5xx so PayPal retries instead of the
+        event being silently dropped.
+      tags: [billing]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: PayPal webhook event envelope (id, event_type, resource, ...) — verbatim as PayPal sends it.
+      responses:
+        '200':
+          description: Signature verified — event handled or deliberately acknowledged-not-acted-on (see WebhookAckResponse.data.handled)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WebhookAckResponse' }
+        '401': { description: "Signature verification failed (malformed body, missing paypal-* headers, or PayPal reported the signature invalid) — nothing credited/refunded" }
+        '404': { description: Billing module disabled }
+        '500': { description: "PayPal's own verify-webhook-signature API was unreachable/non-2xx, OR a signature-valid event could not be processed (malformed shape, or a refund/reversal that couldn't be resolved/applied) — retry later; nothing was silently dropped" }
+
+  # ── Billing admin API (Task 6; require billing.enabled + full admin) ───────
+  /api/v1/admin/billing/payments:
+    get:
+      summary: List payments (admin)
+      description: Paged, newest first. Optional ?status= and ?user_id= filters (AND'd together when both are given).
+      tags: [admin, billing]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { name: status,  in: query, schema: { type: string, enum: [created, approved, captured, failed, refunded] } }
+        - { name: user_id, in: query, schema: { type: string, format: uuid } }
+        - { name: limit,   in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: offset,  in: query, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        '200':
+          description: Payment page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminPaymentListResponse' }
+        '400': { description: user_id filter is not a valid UUID }
+        '403': { description: Not an admin }
+        '404': { description: Billing module disabled }
+  /api/v1/admin/billing/packages:
+    get:
+      summary: List every top-up package, active and inactive (admin)
+      tags: [admin, billing]
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: Full package catalogue
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminPackageListResponse' }
+        '403': { description: Not an admin }
+        '404': { description: Billing module disabled }
+    post:
+      summary: Create a top-up package (admin)
+      tags: [admin, billing]
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, amount_cents, credits]
+              properties:
+                title:        { type: string, minLength: 1, maxLength: 200 }
+                amount_cents: { type: integer, format: int64, minimum: 1 }
+                credits:      { type: integer, format: int64, minimum: 1 }
+                active:       { type: boolean, default: true }
+                sort:         { type: integer, default: 0 }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminPackageResponse' }
+        '400': { description: Validation failed }
+        '403': { description: Not an admin }
+        '404': { description: Billing module disabled }
+  /api/v1/admin/billing/packages/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      summary: Update a top-up package — partial; any of title/amount_cents/credits/active/sort (admin)
+      tags: [admin, billing]
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:        { type: string, minLength: 1, maxLength: 200 }
+                amount_cents: { type: integer, format: int64, minimum: 1 }
+                credits:      { type: integer, format: int64, minimum: 1 }
+                active:       { type: boolean }
+                sort:         { type: integer }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminPackageResponse' }
+        '400': { description: Empty patch, invalid id, or validation failed }
+        '403': { description: Not an admin }
+        '404': { description: "Billing module disabled, or no such package" }
+    delete:
+      summary: Delete a top-up package (admin)
+      tags: [admin, billing]
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessageResponse' }
+        '400': { description: Invalid id }
+        '403': { description: Not an admin }
+        '404': { description: "Billing module disabled, or no such package" }
+  /api/v1/admin/billing/settings:
+    get:
+      summary: Read the billing rate/bounds settings (admin)
+      tags: [admin, billing]
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: Current settings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BillingSettingsResponse' }
+        '403': { description: Not an admin }
+        '404': { description: Billing module disabled }
+    put:
+      summary: Replace the billing rate/bounds settings (admin)
+      description: >
+        A full replace — all three fields are required. Takes effect for the
+        NEXT top-up computed after this call; an in-flight or already-created
+        payment keeps the rate_snapshot/credits_expected it was created with
+        (see Billing::credit_capture — unaffected by this endpoint).
+      tags: [admin, billing]
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [credits_per_unit, min_amount_cents, max_amount_cents]
+              properties:
+                credits_per_unit: { type: integer, format: int64, minimum: 1 }
+                min_amount_cents: { type: integer, format: int64, minimum: 1 }
+                max_amount_cents: { type: integer, format: int64, minimum: 1 }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BillingSettingsResponse' }
+        '400': { description: "Missing/invalid field, or max_amount_cents < min_amount_cents" }
+        '403': { description: Not an admin }
+        '404': { description: Billing module disabled }
+  /api/v1/admin/billing/users/{id}/adjust:
+    post:
+      summary: Manually adjust a user's wallet balance (admin)
+      description: >
+        Routes through Billing::adjust — the only code allowed to write
+        wallet_entries/wallet_balances. note is mandatory (non-empty);
+        created_by on the resulting ledger row is always the authenticated
+        admin's own id, never a client-supplied value. Writes an audit_log row.
+      tags: [admin, billing]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid }, description: Target user id }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [delta_credits, note]
+              properties:
+                delta_credits: { type: integer, format: int64, description: "Signed; positive credits, negative debits. Zero is refused (400)." }
+                note:          { type: string, minLength: 1, maxLength: 2000 }
+      responses:
+        '200':
+          description: Adjusted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdjustResponse' }
+        '400': { description: "Empty/missing note, zero delta_credits, malformed user/admin id, or invalid id path param" }
+        '403': { description: Not an admin }
+        '404': { description: "Billing module disabled, or no such user" }
+        '409': { description: A negative delta_credits would drive the balance below zero }

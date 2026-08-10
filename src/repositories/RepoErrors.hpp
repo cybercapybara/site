@@ -60,4 +60,23 @@ private:
     std::string message_;
 };
 
+/**
+ * @brief → 400. The caller-supplied input is malformed at the SQL boundary
+ *        rather than merely absent or in conflict — e.g. SQLSTATE 22P02
+ *        (invalid_text_representation: a non-UUID string handed to a UUID
+ *        column). @p code is the stable machine code, @p message the
+ *        human-readable detail. Same shape as ConflictError, distinct HTTP
+ *        status.
+ */
+struct ValidationError : RepoError {
+    ValidationError(std::string code, std::string message)
+        : RepoError(message.empty() ? code : message), code_(std::move(code)), message_(std::move(message)) {}
+    const std::string& code() const noexcept { return code_; }
+    const std::string& message() const noexcept { return message_; }
+
+private:
+    std::string code_;
+    std::string message_;
+};
+
 }  // namespace Repositories

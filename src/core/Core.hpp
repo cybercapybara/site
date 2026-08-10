@@ -844,4 +844,12 @@ inline bool content_enabled() {
     return Config::get().get<bool>("content.enabled", "CONTENT_ENABLED", false);
 }
 
+/// Billing module (wallet top-ups) master switch. Routes are statically
+/// registered, so handlers consult this per-request and 404 when off.
+inline bool billing_enabled() {
+    if (!Config::is_initialized())
+        return false;
+    return Config::get().get<bool>("billing.enabled", "BILLING_ENABLED", false);
+}
+
 }  // namespace Core

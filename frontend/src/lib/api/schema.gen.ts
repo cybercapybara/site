@@ -2474,6 +2474,819 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/billing/packages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List active top-up packages
+         * @description Also returns the current per-unit rate (credits_per_unit) and the custom-amount bounds (min_amount_cents/max_amount_cents) alongside the package list — see BillingPackageListResponse.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Active packages (catalogue order) + the current rate/bounds */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BillingPackageListResponse"];
+                    };
+                };
+                /** @description Not authenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Billing module disabled */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/wallet": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get your own wallet balance + ledger history
+         * @description Always the authenticated caller's own wallet — no user-id parameter of any kind is accepted, by design (see BillingController::getWallet).
+         */
+        get: {
+            parameters: {
+                query?: {
+                    limit?: number;
+                    offset?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Balance + ledger page, newest first */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["WalletResponse"];
+                    };
+                };
+                /** @description Not authenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Billing module disabled */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/topup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a PayPal top-up (package or custom amount)
+         * @description Provide exactly one of package_id or amount_cents. Credits are always computed server-side (package.credits, or amount_cents * billing.credits_per_unit / 100) — any "credits" field in the body is ignored entirely. The resulting amount_cents (a custom amount, OR a package's own price) is bounded by billing.min_amount_cents / billing.max_amount_cents in both cases.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /**
+                         * Format: uuid
+                         * @description Mutually exclusive with amount_cents
+                         */
+                        package_id?: string;
+                        /**
+                         * Format: int64
+                         * @description Mutually exclusive with package_id
+                         */
+                        amount_cents?: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description PayPal order created — redirect the buyer to data.approve_url */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TopupResponse"];
+                    };
+                };
+                /** @description Neither/both of package_id+amount_cents given, the resulting amount out of [min,max] (amount_out_of_range or package_price_out_of_range), or malformed input */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not authenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Billing module disabled */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description provider_order_id already recorded (PayPal order id collision) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/capture": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Capture an approved PayPal order and credit your wallet
+         * @description order_id must belong to the authenticated caller — verified via PaymentRepository::find_owned before any capture is attempted, so one user can never capture (and collect credits for) another user's order. Idempotent: capturing an already-captured order returns credited=false with the unchanged balance instead of calling PayPal again. PayPal answers 2xx even for a PENDING or DECLINED capture — the wallet is only ever credited when PayPal's own capture status is COMPLETED; otherwise the payment is left uncaptured (for the webhook to resolve later) and the response reports credited=false with the real status.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @description PayPal order id */
+                        order_id: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Captured, replayed idempotently, or still pending/declined on PayPal's side — see CaptureResponse.status/pending to tell them apart. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaptureResponse"];
+                    };
+                };
+                /** @description order_id missing or not a string */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not authenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Billing module disabled, or no such order for this caller */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description This payment is failed/refunded and cannot be captured (payment_not_capturable), or PayPal reports the order hasn't been approved yet (order_not_approved) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/paypal/webhook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * PayPal webhook — capture/refund notifications
+         * @description PayPal-to-server only, not a browser request: public (no session) and CSRF-exempt (PayPal never presents the session cookie the CSRF check keys off), but every request is verified against PayPal's own verify-webhook-signature API BEFORE the body is trusted, using the paypal-auth-algo / paypal-cert-url / paypal-transmission-id / paypal-transmission-sig / paypal-transmission-time headers PayPal sends. Response codes intentionally do NOT follow the usual REST mapping — PayPal retries any non-2xx delivery for days:
+         *       * PAYMENT.CAPTURE.COMPLETED credits the wallet (idempotent — a
+         *         capture already credited via POST .../capture, including one
+         *         that resolves a PENDING return-flow capture, is a 200 no-op).
+         *       * PAYMENT.CAPTURE.REFUNDED (merchant refund) and
+         *         PAYMENT.CAPTURE.REVERSED (PayPal claws back a capture —
+         *         chargeback/dispute/risk) both DEBIT the wallet via the same
+         *         Billing::refund_capture logic, keyed on the event's own id as
+         *         the idempotency marker — see BillingController::
+         *         handleCaptureRefunded's doc comment for why both event types
+         *         share one handler.
+         *       * Any other event type is acknowledged with 200 and NOT acted on.
+         *     200 is returned for every signature-valid event that was either applied or safely no-op'd; a signature-valid event this handler FAILED to process (a malformed body, or a refund/reversal it couldn't resolve/apply) answers 5xx so PayPal retries instead of the event being silently dropped.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            responses: {
+                /** @description Signature verified — event handled or deliberately acknowledged-not-acted-on (see WebhookAckResponse.data.handled) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["WebhookAckResponse"];
+                    };
+                };
+                /** @description Signature verification failed (malformed body, missing paypal-* headers, or PayPal reported the signature invalid) — nothing credited/refunded */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Billing module disabled */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description PayPal's own verify-webhook-signature API was unreachable/non-2xx, OR a signature-valid event could not be processed (malformed shape, or a refund/reversal that couldn't be resolved/applied) — retry later; nothing was silently dropped */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/billing/payments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List payments (admin)
+         * @description Paged, newest first. Optional ?status= and ?user_id= filters (AND'd together when both are given).
+         */
+        get: {
+            parameters: {
+                query?: {
+                    status?: "created" | "approved" | "captured" | "failed" | "refunded";
+                    user_id?: string;
+                    limit?: number;
+                    offset?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Payment page */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminPaymentListResponse"];
+                    };
+                };
+                /** @description user_id filter is not a valid UUID */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not an admin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Billing module disabled */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/billing/packages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List every top-up package, active and inactive (admin) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Full package catalogue */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminPackageListResponse"];
+                    };
+                };
+                /** @description Not an admin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Billing module disabled */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        /** Create a top-up package (admin) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        title: string;
+                        /** Format: int64 */
+                        amount_cents: number;
+                        /** Format: int64 */
+                        credits: number;
+                        /** @default true */
+                        active?: boolean;
+                        /** @default 0 */
+                        sort?: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminPackageResponse"];
+                    };
+                };
+                /** @description Validation failed */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not an admin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Billing module disabled */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/billing/packages/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a top-up package (admin) */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Deleted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MessageResponse"];
+                    };
+                };
+                /** @description Invalid id */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not an admin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Billing module disabled, or no such package */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        /** Update a top-up package — partial; any of title/amount_cents/credits/active/sort (admin) */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        title?: string;
+                        /** Format: int64 */
+                        amount_cents?: number;
+                        /** Format: int64 */
+                        credits?: number;
+                        active?: boolean;
+                        sort?: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminPackageResponse"];
+                    };
+                };
+                /** @description Empty patch */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not an admin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Billing module disabled, or no such package */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/api/v1/admin/billing/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the billing rate/bounds settings (admin) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Current settings */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BillingSettingsResponse"];
+                    };
+                };
+                /** @description Not an admin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Billing module disabled */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        /**
+         * Replace the billing rate/bounds settings (admin)
+         * @description A full replace — all three fields are required. Takes effect for the NEXT top-up computed after this call; an in-flight or already-created payment keeps the rate_snapshot/credits_expected it was created with (see Billing::credit_capture — unaffected by this endpoint).
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** Format: int64 */
+                        credits_per_unit: number;
+                        /** Format: int64 */
+                        min_amount_cents: number;
+                        /** Format: int64 */
+                        max_amount_cents: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BillingSettingsResponse"];
+                    };
+                };
+                /** @description Missing/invalid field, or max_amount_cents < min_amount_cents */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not an admin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Billing module disabled */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/billing/users/{id}/adjust": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Manually adjust a user's wallet balance (admin)
+         * @description Routes through Billing::adjust — the only code allowed to write wallet_entries/wallet_balances. note is mandatory (non-empty); created_by on the resulting ledger row is always the authenticated admin's own id, never a client-supplied value. Writes an audit_log row.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Target user id */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /**
+                         * Format: int64
+                         * @description Signed; positive credits, negative debits. Zero is refused (400).
+                         */
+                        delta_credits: number;
+                        note: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Adjusted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdjustResponse"];
+                    };
+                };
+                /** @description Empty/missing note, zero delta_credits, malformed user/admin id, or invalid id path param */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not an admin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Billing module disabled, or no such user */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description A negative delta_credits would drive the balance below zero */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2608,6 +3421,167 @@ export interface components {
         };
         MessageResponse: {
             message?: string;
+        };
+        BillingPackage: {
+            /** Format: uuid */
+            id: string;
+            title: string;
+            /** Format: int64 */
+            amount_cents: number;
+            /** Format: int64 */
+            credits: number;
+            active: boolean;
+            sort: number;
+            created_at: string;
+            updated_at: string;
+        };
+        BillingPackageListResponse: {
+            data: components["schemas"]["BillingPackage"][];
+            /**
+             * Format: int64
+             * @description billing.credits_per_unit — credits per 100 cents
+             */
+            credits_per_unit: number;
+            /**
+             * Format: int64
+             * @description Minimum accepted amount_cents for a custom top-up
+             */
+            min_amount_cents: number;
+            /**
+             * Format: int64
+             * @description Maximum accepted amount_cents for a custom top-up
+             */
+            max_amount_cents: number;
+        };
+        WalletEntry: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            user_id: string;
+            /** Format: int64 */
+            delta_credits: number;
+            /** @enum {string} */
+            kind: "topup" | "spend" | "adjustment" | "refund";
+            reference: string;
+            note: string;
+            /** Format: uuid */
+            created_by?: string | null;
+            created_at: string;
+        };
+        PublicWalletEntry: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            user_id: string;
+            /** Format: int64 */
+            delta_credits: number;
+            /** @enum {string} */
+            kind: "topup" | "spend" | "adjustment" | "refund";
+            reference: string;
+            note: string;
+            created_at: string;
+        };
+        WalletResponse: {
+            data: {
+                /** Format: int64 */
+                balance: number;
+                history: components["schemas"]["PublicWalletEntry"][];
+            };
+            limit: number;
+            offset: number;
+        };
+        TopupResponse: {
+            data: {
+                /** @description PayPal order id — pass back to POST .../capture */
+                order_id: string;
+                /**
+                 * Format: uri
+                 * @description Redirect the buyer here to approve the order on PayPal
+                 */
+                approve_url: string;
+            };
+        };
+        CaptureResponse: {
+            data: {
+                /** @description false on an idempotent replay, or when PayPal has not yet COMPLETED the capture */
+                credited: boolean;
+                /**
+                 * Format: int64
+                 * @description Wallet balance AFTER this call (unchanged if not credited)
+                 */
+                balance: number;
+                /** @description "captured" once this or an earlier call credited the wallet; otherwise PayPal's own capture status verbatim (e.g. "PENDING", "DECLINED") — PayPal answers 2xx for both, so this is how a caller tells a settled capture from one still in flight. */
+                status: string;
+                /** @description Present (true) only when PayPal's capture has not reached COMPLETED yet — the payment is left uncaptured for the webhook to resolve. */
+                pending?: boolean;
+            };
+        };
+        WebhookAckResponse: {
+            data: {
+                /** @description true if this event type drives real crediting/refund logic (whether or not it was a no-op replay); false for an ignored/unrecognized event type */
+                handled: boolean;
+            };
+        };
+        AdminPackageResponse: {
+            data: components["schemas"]["BillingPackage"];
+        };
+        AdminPackageListResponse: {
+            data: components["schemas"]["BillingPackage"][];
+        };
+        AdminPaymentListResponse: {
+            data: components["schemas"]["Payment"][];
+            total: number;
+            limit: number;
+            offset: number;
+        };
+        Payment: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            user_id: string;
+            provider: string;
+            provider_order_id: string;
+            provider_capture_id?: string | null;
+            /** Format: int64 */
+            amount_cents: number;
+            currency: string;
+            /** Format: int64 */
+            credits_expected: number;
+            /** Format: int64 */
+            rate_snapshot: number;
+            /** Format: uuid */
+            package_id?: string | null;
+            /** @enum {string} */
+            status: "created" | "approved" | "captured" | "failed" | "refunded";
+            failure_reason?: string | null;
+            created_at: string;
+            updated_at: string;
+        };
+        BillingSettings: {
+            /**
+             * Format: int64
+             * @description Credits granted per 100 cents on a custom-amount top-up
+             */
+            credits_per_unit: number;
+            /** Format: int64 */
+            min_amount_cents: number;
+            /** Format: int64 */
+            max_amount_cents: number;
+            updated_at: string;
+        };
+        BillingSettingsResponse: {
+            data: components["schemas"]["BillingSettings"];
+        };
+        AdjustResponse: {
+            data: {
+                /**
+                 * Format: int64
+                 * @description Wallet balance AFTER this adjustment
+                 */
+                balance: number;
+                /** @description false only if this exact adjustment somehow no-op'd (not expected in normal use — adjust() has no idempotency key) */
+                credited: boolean;
+            };
         };
     };
     responses: never;

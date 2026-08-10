@@ -17,6 +17,9 @@ import { ChangeEmailPage } from '@/pages/ChangeEmail';
 import { RequestResetPage } from '@/pages/RequestReset';
 import { ResetPasswordPage } from '@/pages/ResetPassword';
 import { JoinFromInvitePage } from '@/pages/JoinFromInvite';
+import { BillingPage } from '@/pages/Billing';
+import { BillingReturnPage } from '@/pages/BillingReturn';
+import { BillingCancelPage } from '@/pages/BillingCancel';
 
 // Admin pages are code-split: a logged-out visitor on /login should not pull
 // the whole admin bundle. React.lazy needs a module with a `default` export,
@@ -49,6 +52,9 @@ const AdminPostsPage = lazy(() =>
 );
 const AdminMediaPage = lazy(() =>
   import('@/pages/admin/Media').then((m) => ({ default: m.AdminMediaPage })),
+);
+const AdminBillingPage = lazy(() =>
+  import('@/pages/admin/Billing').then((m) => ({ default: m.AdminBillingPage })),
 );
 
 /**
@@ -123,6 +129,12 @@ export const routes: RouteEntry[] = [
   { path: '/account', element: <ProfilePage />, guard: 'confirmed' },
   { path: '/account/change-password', element: <ChangePasswordPage />, guard: 'confirmed' },
   { path: '/account/change-email', element: <ChangeEmailPage />, guard: 'confirmed' },
+  // No navLabel — wallet access is a page a user navigates to (e.g. from
+  // /account or a "buy credits" prompt), not a top-nav destination, matching
+  // the Posts/Media tiles-only decision below.
+  { path: '/billing', element: <BillingPage />, guard: 'confirmed' },
+  { path: '/billing/return', element: <BillingReturnPage />, guard: 'confirmed' },
+  { path: '/billing/cancel', element: <BillingCancelPage />, guard: 'confirmed' },
 
   // ── Admin — gated by Permission.Administer (0x40000000 sentinel) ────────
   {
@@ -153,6 +165,9 @@ export const routes: RouteEntry[] = [
   },
   { path: '/admin/posts', element: <AdminPostsPage />, guard: 'admin' },
   { path: '/admin/media', element: <AdminMediaPage />, guard: 'admin' },
+  // No navLabel — tiles-only, matching the Posts/Media decision (the
+  // /admin dashboard tile is the entry point, not the top nav).
+  { path: '/admin/billing', element: <AdminBillingPage />, guard: 'admin' },
 ];
 
 /** The permission a guard implies, for nav-link filtering in Nav.tsx. */

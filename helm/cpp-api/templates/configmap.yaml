@@ -122,5 +122,21 @@ data:
             "topics": ["default_topic"]
           }
         }
+      },
+      "billing": {
+        "enabled": {{ .Values.billing.enabled }},
+        "provider": {{ .Values.billing.provider | quote }},
+        "currency": {{ .Values.billing.currency | quote }},
+        "credits_per_unit": {{ .Values.billing.creditsPerUnit }},
+        "min_amount_cents": {{ .Values.billing.minAmountCents }},
+        "max_amount_cents": {{ .Values.billing.maxAmountCents }},
+        "paypal": {
+          "environment": {{ .Values.billing.paypal.environment | quote }},
+          "client_id": {{ .Values.billing.paypal.clientId | quote }},
+          "client_secret": "${PAYPAL_CLIENT_SECRET:-}",
+          "webhook_id": {{ .Values.billing.paypal.webhookId | quote }},
+          "return_url": {{ .Values.billing.paypal.returnUrl | quote }},
+          "cancel_url": {{ .Values.billing.paypal.cancelUrl | quote }}
+        }
       }
     }

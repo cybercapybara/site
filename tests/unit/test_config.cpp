@@ -239,6 +239,15 @@ TEST_F(ConfigTest, ContentDisabledByDefault) {
     EXPECT_FALSE(Config::get().get<bool>("content.enabled", "CONTENT_ENABLED", false));
 }
 
+// ── Billing module master switch (PayPal wallet top-ups) ───────────────────
+
+TEST_F(ConfigTest, BillingDisabledByDefault) {
+    // test_config_file (see SetUp) carries no "billing" section — the flag
+    // must default off.
+    Config::initialize(test_config_file);
+    EXPECT_FALSE(Config::get().get<bool>("billing.enabled", "BILLING_ENABLED", false));
+}
+
 TEST_F(ConfigTest, GetJsonRawAccess) {
     Config::initialize(test_config_file);
     auto& config = Config::get();

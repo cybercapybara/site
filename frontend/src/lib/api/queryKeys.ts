@@ -8,6 +8,12 @@
  */
 export const qk = {
   me: () => ['me'] as const,
+  billing: {
+    packages: () => ['billing', 'packages'] as const,
+    /** Own wallet balance + ledger page. usePagedQuery-style: page appended by callers. */
+    wallet: (page?: number) =>
+      page === undefined ? (['billing', 'wallet'] as const) : (['billing', 'wallet', page] as const),
+  },
   admin: {
     users: (page?: number) =>
       page === undefined ? (['admin', 'users'] as const) : (['admin', 'users', page] as const),
@@ -37,5 +43,19 @@ export const qk = {
       filters === undefined
         ? (['admin', 'audit'] as const)
         : (['admin', 'audit', JSON.stringify(filters)] as const),
+    billing: {
+      packages: () => ['admin', 'billing', 'packages'] as const,
+      /**
+       * Payments list. `filter` is the serialised {status, user_id} filter —
+       * a changed filter is a fresh cache entry; the bare prefix still
+       * matches every variant for invalidation. usePagedQuery appends page.
+       */
+      payments: (filter?: string, page?: number) => {
+        if (filter === undefined) return ['admin', 'billing', 'payments'] as const;
+        if (page === undefined) return ['admin', 'billing', 'payments', filter] as const;
+        return ['admin', 'billing', 'payments', filter, page] as const;
+      },
+      settings: () => ['admin', 'billing', 'settings'] as const,
+    },
   },
 } as const;

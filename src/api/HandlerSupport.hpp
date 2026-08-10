@@ -45,12 +45,16 @@ namespace Api {
  *   DuplicateEmail -> 409 email_taken | UserNotFound -> 404 user
  *   DuplicateRole  -> 409 role_exists | RoleNotFound -> 404 role
  *   RoleInUse      -> 409 role_in_use | anything else -> 500
+ *   Repositories::ValidationError subclasses -> 400 (malformed input at the
+ *   SQL boundary, e.g. a non-UUID id — see Billing::adjust)
  */
 template <typename Fn>
 inline bool with_repo_errors(const std::function<void(const drogon::HttpResponsePtr&)>& cb, const char* op, Fn&& fn) {
     try {
         fn();
         return true;
+    } catch (const Repositories::ValidationError& e) {
+        cb(ErrorResponse::bad_request(e.code(), e.message()));
     } catch (const Repositories::ConflictError& e) {
         cb(ErrorResponse::conflict(e.code(), e.message()));
     } catch (const Repositories::NotFoundError& e) {
