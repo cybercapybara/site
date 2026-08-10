@@ -175,8 +175,13 @@ protected:
                                       const std::string& order_id,
                                       std::int64_t amount_cents,
                                       const std::string& created_offset) {
-        auto p = payments.create(
-            user_id, order_id, amount_cents, "USD", /*credits_expected=*/amount_cents, /*rate_snapshot=*/100, std::nullopt);
+        auto p = payments.create(user_id,
+                                 order_id,
+                                 amount_cents,
+                                 "USD",
+                                 /*credits_expected=*/amount_cents,
+                                 /*rate_snapshot=*/100,
+                                 std::nullopt);
         backdate_payment(p.id, created_offset);
         return p;
     }
@@ -186,8 +191,13 @@ protected:
                                 const std::string& order_id,
                                 std::int64_t amount_cents,
                                 const std::string& created_offset) {
-        auto p = payments.create(
-            user_id, order_id, amount_cents, "USD", /*credits_expected=*/amount_cents, /*rate_snapshot=*/100, std::nullopt);
+        auto p = payments.create(user_id,
+                                 order_id,
+                                 amount_cents,
+                                 "USD",
+                                 /*credits_expected=*/amount_cents,
+                                 /*rate_snapshot=*/100,
+                                 std::nullopt);
         Database::get().execute_write([&](auto& txn) {
             txn.exec_params("UPDATE payments SET status = 'failed' WHERE id = $1", p.id);
             return 0;

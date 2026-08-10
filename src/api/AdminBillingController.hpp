@@ -36,7 +36,6 @@
 #include <string>
 
 #include <drogon/HttpController.h>
-
 #include <spdlog/spdlog.h>
 
 #include <nlohmann/json.hpp>
@@ -474,17 +473,17 @@ public:
                 {"created", m.conversion_created}, {"captured", m.conversion_captured}, {"rate", m.conversion_rate}};
 
             json data = {{"period", period},
-                        {"revenue_cents", m.revenue_cents},
-                        {"payments_count", m.payments_count},
-                        {"avg_payment_cents", m.avg_payment_cents},
-                        {"conversion", conversion},
-                        {"refunds_cents", m.refunds_cents},
-                        {"refunds_count", m.refunds_count},
-                        {"outstanding_credits", m.outstanding_credits},
-                        {"outstanding_value_cents", m.outstanding_value_cents},
-                        {"series", series},
-                        {"top_packages", top_packages},
-                        {"top_users", top_users}};
+                         {"revenue_cents", m.revenue_cents},
+                         {"payments_count", m.payments_count},
+                         {"avg_payment_cents", m.avg_payment_cents},
+                         {"conversion", conversion},
+                         {"refunds_cents", m.refunds_cents},
+                         {"refunds_count", m.refunds_count},
+                         {"outstanding_credits", m.outstanding_credits},
+                         {"outstanding_value_cents", m.outstanding_value_cents},
+                         {"series", series},
+                         {"top_packages", top_packages},
+                         {"top_users", top_users}};
 
             callback(Response::ok({{"data", data}}));
         });

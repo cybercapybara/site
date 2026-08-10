@@ -83,7 +83,9 @@ inline std::string format_signed_credits(std::int64_t delta_credits) {
 /// stored historical timestamp to draw from at all (it's a live admin
 /// action), so this file computes it directly rather than taking it as a
 /// parameter.
-inline std::string now_iso8601() { return Utils::Time::epoch_to_iso8601(Utils::Time::now_epoch_seconds()); }
+inline std::string now_iso8601() {
+    return Utils::Time::epoch_to_iso8601(Utils::Time::now_epoch_seconds());
+}
 
 /**
  * @brief Render + enqueue one billing email. NEVER throws — a render
@@ -129,8 +131,7 @@ inline void receipt(const Domain::User& user,
         ctx["date"] = date;
         detail::send_rendered("billing_receipt", "Your top-up receipt", user, ctx);
     } catch (const std::exception& e) {
-        spdlog::warn(
-            "BillingEmails::receipt: failed for {}: {}", Utils::Strings::mask_email(user.email), e.what());
+        spdlog::warn("BillingEmails::receipt: failed for {}: {}", Utils::Strings::mask_email(user.email), e.what());
     }
 }
 
@@ -225,8 +226,7 @@ inline void adjustment(const Domain::User& user,
         ctx["date"] = detail::now_iso8601();
         detail::send_rendered("billing_adjustment", "Your wallet balance was adjusted", user, ctx);
     } catch (const std::exception& e) {
-        spdlog::warn(
-            "BillingEmails::adjustment: failed for {}: {}", Utils::Strings::mask_email(user.email), e.what());
+        spdlog::warn("BillingEmails::adjustment: failed for {}: {}", Utils::Strings::mask_email(user.email), e.what());
     }
 }
 

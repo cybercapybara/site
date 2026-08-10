@@ -38,10 +38,9 @@
 #pragma once
 
 #include <cstdint>
+#include <pqxx/pqxx>
 #include <string>
 #include <vector>
-
-#include <pqxx/pqxx>
 
 #include "database/Database.hpp"
 #include "utils/Time.hpp"
@@ -59,10 +58,10 @@ struct MetricsWindow {
     std::string bucket_field;      // "hour" | "day" — date_trunc() field for `series`
     std::string bucket_step;       // "1 hour" | "1 day" — generate_series() step
     std::string bucket_span;       // (bucket_count - 1) * bucket_step, precomputed as its own interval
-                                    // literal so the SQL never has to multiply an interval by an
-                                    // integer parameter (Postgres's operator resolution for that combination
-                                    // is not guaranteed to be unambiguous across versions — a literal offset
-                                    // sidesteps the question entirely).
+                                   // literal so the SQL never has to multiply an interval by an
+                                   // integer parameter (Postgres's operator resolution for that combination
+                                   // is not guaranteed to be unambiguous across versions — a literal offset
+                                   // sidesteps the question entirely).
     int bucket_count;              // 24 | 7 | 30 — exact row count `series` will have
 
     static MetricsWindow for_period(const std::string& period) {
@@ -147,9 +146,9 @@ public:
                 w.rolling_interval);
             m.conversion_created = conv[0]["total"].template as<std::int64_t>();
             m.conversion_captured = conv[0]["captured"].template as<std::int64_t>();
-            m.conversion_rate = m.conversion_created > 0
-                                    ? static_cast<double>(m.conversion_captured) / static_cast<double>(m.conversion_created)
-                                    : 0.0;
+            m.conversion_rate = m.conversion_created > 0 ? static_cast<double>(m.conversion_captured) /
+                                                               static_cast<double>(m.conversion_created)
+                                                         : 0.0;
 
             // ── refunds: only rows that actually debited the wallet ────────────
             // (outcome='applied' — 'skipped_insufficient'/'skipped_zero_credits'
@@ -170,8 +169,7 @@ public:
             // (BillingController::resolve_topup_plan) — see file doc comment.
             // credits_per_unit > 0 is a DB CHECK constraint (migration 009), but
             // guard anyway rather than trust that invariant across a boundary.
-            m.outstanding_value_cents =
-                credits_per_unit > 0 ? (m.outstanding_credits * 100) / credits_per_unit : 0;
+            m.outstanding_value_cents = credits_per_unit > 0 ? (m.outstanding_credits * 100) / credits_per_unit : 0;
 
             // ── series: calendar-bucketed, LEFT JOINed so empty buckets are 0 ──
             auto series_rows = txn.exec_params(

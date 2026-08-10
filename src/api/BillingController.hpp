@@ -546,8 +546,8 @@ private:
                                          now_iso8601());
         } catch (const std::exception& e) {
             spdlog::warn("billing email: failed to dispatch failed-payment email for payment {}: {}",
-                        result.payment_id,
-                        e.what());
+                         result.payment_id,
+                         e.what());
         }
     }
 
@@ -564,7 +564,7 @@ private:
     /// no wallet_entries row at all. Small bounded scan (newest 10) of the
     /// primary, run once right after the write.
     static std::optional<Domain::WalletEntry> find_refund_ledger_entry(const std::string& user_id,
-                                                                        const std::string& provider_refund_id) {
+                                                                       const std::string& provider_refund_id) {
         for (const auto& e : Billing::history(user_id, /*limit=*/10, /*offset=*/0, /*from_primary=*/true)) {
             if (e.kind == Domain::WalletEntryKind::kRefund && e.reference == provider_refund_id)
                 return e;
