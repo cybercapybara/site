@@ -62,9 +62,13 @@ export function Nav() {
   );
 
   // A route is active when the current path matches exactly, or is a child of
-  // it (so /admin/users still highlights "Admin"). "/" matches only itself.
+  // it on a real path-segment boundary (so /admin/users still highlights
+  // "Admin", but /administrators would NOT, and a plain string prefix can't
+  // light up two links at once). "/" matches only itself.
   const isActive = (path: string) =>
-    path === '/' ? location.pathname === '/' : location.pathname.startsWith(path);
+    path === '/'
+      ? location.pathname === '/'
+      : location.pathname === path || location.pathname.startsWith(path + '/');
 
   const logoutAndRedirect = async () => {
     await logout.mutateAsync();

@@ -1,5 +1,5 @@
 import { lazy, type ReactElement } from 'react';
-import { Shield, ScrollText } from 'lucide-react';
+import { Shield } from 'lucide-react';
 
 import { Permission } from '@/lib/auth/permissions';
 
@@ -152,16 +152,16 @@ export const routes: RouteEntry[] = [
 
   // ── Audit — read-only, gated on kAuditRead (0x02) rather than full ──────
   // Administer. A 'confirmed' guard + requirePermission means App.tsx wraps
-  // it in a ProtectedRoute for the AuditRead bit and Nav filters the link by
-  // it; full admins (the Administer sentinel) satisfy every check, so they
-  // see it too.
+  // it in a ProtectedRoute for the AuditRead bit; full admins (the Administer
+  // sentinel) satisfy every check, so they see it too. Not in the top nav —
+  // reached via the Audit-log tile on the /admin dashboard (like Posts/Media/
+  // Billing), so it doesn't crowd the primary nav or collide with /admin's
+  // active-highlight.
   {
     path: '/admin/audit',
     element: <AdminAuditPage />,
     guard: 'confirmed',
     requirePermission: Permission.AuditRead,
-    navLabel: 'Audit',
-    navIcon: ScrollText,
   },
   { path: '/admin/posts', element: <AdminPostsPage />, guard: 'admin' },
   { path: '/admin/media', element: <AdminMediaPage />, guard: 'admin' },
