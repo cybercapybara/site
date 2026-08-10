@@ -50,6 +50,7 @@
 #include "domain/Billing.hpp"
 #include "domain/User.hpp"
 #include "email/BillingEmails.hpp"
+#include "repositories/BillingMetricsRepository.hpp"
 #include "repositories/BillingRepository.hpp"
 #include "repositories/UserRepository.hpp"
 #include "security/Audit.hpp"
@@ -72,6 +73,7 @@ public:
     ADD_METHOD_TO(AdminBillingController::getSettings, "/api/v1/admin/billing/settings", Get);
     ADD_METHOD_TO(AdminBillingController::updateSettings, "/api/v1/admin/billing/settings", Put);
     ADD_METHOD_TO(AdminBillingController::adjustWallet, "/api/v1/admin/billing/users/{1}/adjust", Post);
+    ADD_METHOD_TO(AdminBillingController::metrics, "/api/v1/admin/billing/metrics", Get);
     METHOD_LIST_END
 
     // ── GET /api/v1/admin/billing/payments ──────────────────────────────────
@@ -410,6 +412,82 @@ public:
             if (user)
                 Email::BillingEmails::adjustment(*user, delta_credits, note, adjust_result->balance);
         }
+    }
+
+    // ── GET /api/v1/admin/billing/metrics ───────────────────────────────────
+    // Business-metrics dashboard aggregate (Task 3, billing-emails-dashboard):
+    // revenue/count/avg (captured payments), conversion (captured vs created),
+    // applied refunds, the all-time outstanding wallet liability, a gap-free
+    // time series, and top packages/users — all in one read-only round trip.
+    // See BillingMetricsRepository.hpp for the exact SQL and window semantics.
+    void metrics(const HttpRequestPtr& req, std::function<void(const HttpResponsePtr&)>&& callback) {
+        if (!Core::billing_enabled()) {
+            callback(ErrorResponse::not_found("billing"));
+            return;
+        }
+        API_REQUIRE_ADMIN(req, callback);
+
+        // ?period=day|week|month, default week; anything else -> 400. Checked
+        // against a fixed allow-list BEFORE it ever reaches
+        // MetricsWindow::for_period / SQL, same discipline as every other
+        // client-supplied enum in this file (e.g. listPayments' ?status=).
+        std::string period = req->getParameter("period");
+        if (period.empty())
+            period = "week";
+        if (period != "day" && period != "week" && period != "month") {
+            callback(ErrorResponse::bad_request("invalid_period", "period must be one of: day, week, month"));
+            return;
+        }
+
+        with_repo_errors(callback, "admin billing metrics", [&] {
+            // Current rate, same source BillingController::billing_limits() uses
+            // for a live top-up — see BillingMetricsRepository.hpp's file doc
+            // comment for why the repository itself doesn't read billing_settings.
+            Repositories::BillingSettingsRepository settings_repo;
+            const auto settings = settings_repo.get();
+
+            Repositories::BillingMetricsRepository repo;
+            const auto w = Repositories::MetricsWindow::for_period(period);
+            auto m = repo.get(w, settings.credits_per_unit);
+
+            json series = json::array();
+            for (const auto& pt : m.series)
+                series.push_back({{"bucket_start", pt.bucket_start},
+                                  {"revenue_cents", pt.revenue_cents},
+                                  {"payments_count", pt.payments_count}});
+
+            json top_packages = json::array();
+            for (const auto& tp : m.top_packages)
+                top_packages.push_back({{"package_id", tp.package_id},
+                                        {"title", tp.title},
+                                        {"revenue_cents", tp.revenue_cents},
+                                        {"payments_count", tp.payments_count}});
+
+            json top_users = json::array();
+            for (const auto& tu : m.top_users)
+                top_users.push_back({{"user_id", tu.user_id},
+                                     {"email", tu.email},
+                                     {"topup_credits", tu.topup_credits},
+                                     {"revenue_cents", tu.revenue_cents}});
+
+            json conversion = {
+                {"created", m.conversion_created}, {"captured", m.conversion_captured}, {"rate", m.conversion_rate}};
+
+            json data = {{"period", period},
+                        {"revenue_cents", m.revenue_cents},
+                        {"payments_count", m.payments_count},
+                        {"avg_payment_cents", m.avg_payment_cents},
+                        {"conversion", conversion},
+                        {"refunds_cents", m.refunds_cents},
+                        {"refunds_count", m.refunds_count},
+                        {"outstanding_credits", m.outstanding_credits},
+                        {"outstanding_value_cents", m.outstanding_value_cents},
+                        {"series", series},
+                        {"top_packages", top_packages},
+                        {"top_users", top_users}};
+
+            callback(Response::ok({{"data", data}}));
+        });
     }
 
 private:
