@@ -216,6 +216,12 @@ public:
         }
         const std::string order_id = body["order_id"].get<std::string>();
 
+        // Set ONLY on the credit_capture path below, inside the lambda —
+        // used to dispatch the receipt/failed email AFTER with_repo_errors
+        // returns (see the FIX round 1 note past the with_repo_errors call
+        // for why this can't safely happen inside the lambda).
+        std::optional<Billing::CreditResult> capture_result;
+
         with_repo_errors(callback, "billing capture", [&] {
             Repositories::PaymentRepository payments;
             // Read the PRIMARY: a capture attempted moments after topup (the
@@ -288,21 +294,31 @@ public:
             auto result = Billing::credit_capture(order_id, cap.capture_id, cap.amount_cents, cap.currency);
             callback(Response::ok(
                 {{"data", {{"credited", result.credited}, {"balance", result.balance}, {"status", "captured"}}}}));
-
-            // Email dispatch happens AFTER the response is built and
-            // credit_capture's own transaction has fully committed — never
-            // inside Database::execute_write. `owned` (read above, before
-            // the PayPal capture call) was already verified to be neither
-            // captured/failed/refunded, so was_failed_before=false is
-            // correct here: any 'failed' status found now can only be a
-            // transition this call itself just caused (modulo the rare
-            // documented race with a concurrent webhook — see
-            // dispatchFailedEmailIfJustTransitioned's doc comment).
-            if (result.credited)
-                dispatchReceiptEmail(result);
-            else
-                dispatchFailedEmailIfJustTransitioned(result, /*was_failed_before=*/false);
+            // Stash for dispatch AFTER with_repo_errors returns — see below.
+            // Do NOT dispatch here: with_repo_errors' own catch would call
+            // callback() a SECOND time on an already-answered request if
+            // anything past this point ever threw (see FIX round 1).
+            capture_result = result;
         });
+
+        // Outside with_repo_errors' lambda entirely — the response has
+        // already been sent (or, on any early-return/error path above,
+        // capture_result is still empty and nothing is dispatched at all).
+        // A dispatch helper throwing here can no longer trigger a second
+        // callback() no matter what — with_repo_errors has already
+        // returned. `owned` (read inside the lambda, before the PayPal
+        // capture call) was already verified to be neither
+        // captured/failed/refunded, so was_failed_before=false is correct:
+        // any 'failed' status found now can only be a transition this call
+        // itself just caused (modulo the rare documented race with a
+        // concurrent webhook — see dispatchFailedEmailIfJustTransitioned's
+        // doc comment).
+        if (capture_result) {
+            if (capture_result->credited)
+                dispatchReceiptEmail(*capture_result);
+            else
+                dispatchFailedEmailIfJustTransitioned(*capture_result, /*was_failed_before=*/false);
+        }
     }
 
     // ── POST /api/v1/billing/paypal/webhook ─────────────────────────────────
